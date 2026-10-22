@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -117,8 +118,11 @@ type FailureNotificationStore interface {
 }
 
 type MySQLJobStore struct {
-	db     *sql.DB
-	target string
+	db *sql.DB
+	// Reserve connections for heartbeats so progress persistence and job
+	// reconciliation cannot exhaust the pool needed to retain ownership.
+	leaseDB *sql.DB
+	target  string
 }
 
 func normalizeJobStoreDSN(dsn string) (string, error) {
@@ -151,14 +155,41 @@ func NewMySQLJobStore(dsn string) (*MySQLJobStore, error) {
 	db.SetConnMaxIdleTime(time.Minute)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
-	return &MySQLJobStore{db: db, target: target}, nil
+	leaseConfig, err := drivermysql.ParseDSN(normalizedDSN)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if leaseConfig.Params == nil {
+		leaseConfig.Params = make(map[string]string)
+	}
+	// Client cancellation closes a socket; it does not immediately end a
+	// blocked server statement. Keep abandoned heartbeat lock waits short.
+	leaseConfig.Params["innodb_lock_wait_timeout"] = "1"
+	leaseDB, err := sql.Open("mysql", leaseConfig.FormatDSN())
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	leaseDB.SetMaxOpenConns(4)
+	leaseDB.SetMaxIdleConns(4)
+	leaseDB.SetConnMaxIdleTime(time.Minute)
+	leaseDB.SetConnMaxLifetime(30 * time.Minute)
+	return &MySQLJobStore{db: db, leaseDB: leaseDB, target: target}, nil
 }
 
 func (s *MySQLJobStore) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil {
 		return nil
 	}
-	return s.db.Close()
+	var errs []error
+	if s.db != nil {
+		errs = append(errs, s.db.Close())
+	}
+	if s.leaseDB != nil {
+		errs = append(errs, s.leaseDB.Close())
+	}
+	return errors.Join(errs...)
 }
 
 func (s *MySQLJobStore) Init(ctx context.Context) error {
@@ -494,7 +525,6 @@ func (s *MySQLJobStore) ClaimJobs(ctx context.Context, role JobExecutionRole, ow
 		return nil, nil
 	}
 
-	leaseUntil := time.Now().UTC().Add(leaseDuration)
 	for _, id := range ids {
 		// A legacy control plane can insert an empty submission after Init.
 		// Backfill only this locked candidate, atomically with its lease. A
@@ -502,11 +532,11 @@ func (s *MySQLJobStore) ClaimJobs(ctx context.Context, role JobExecutionRole, ow
 		// none match the predicate and can block renewal beyond lease expiry.
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE job_registry
-			SET lease_owner=?, lease_until=?,
+			SET lease_owner=?, lease_until=TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)),
 			    submission_id=CASE WHEN submission_id='' THEN LOWER(REPLACE(UUID(), '-', '')) ELSE submission_id END
 			WHERE job_id=? AND execution_role=? AND desired_state=?
 			  AND (lease_until IS NULL OR lease_until < UTC_TIMESTAMP(6))`,
-			owner, leaseUntil, id, string(role), string(DesiredStateRunning)); err != nil {
+			owner, leaseDuration.Microseconds(), id, string(role), string(DesiredStateRunning)); err != nil {
 			return nil, err
 		}
 	}
@@ -526,12 +556,16 @@ func (s *MySQLJobStore) RenewJobLease(ctx context.Context, jobID, submissionID, 
 	if leaseDuration <= 0 {
 		leaseDuration = 30 * time.Second
 	}
-	result, err := s.db.ExecContext(ctx, `
+	db := s.leaseDB
+	if db == nil {
+		db = s.db
+	}
+	result, err := db.ExecContext(ctx, `
 		UPDATE job_registry
-		SET lease_until=?
+		SET lease_until=TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6))
 		WHERE job_id=? AND submission_id=? AND lease_owner=?
 		  AND (desired_state=? OR last_status IN ('PAUSING','STOPPING'))`,
-		time.Now().UTC().Add(leaseDuration), jobID, submissionID, owner, string(DesiredStateRunning))
+		leaseDuration.Microseconds(), jobID, submissionID, owner, string(DesiredStateRunning))
 	if err != nil {
 		return false, err
 	}

@@ -15,6 +15,9 @@ import (
 const (
 	MaintenanceReservationStreaming = "streaming"
 	MaintenanceReservationSnapshot  = "snapshot"
+	// Ownership work locks registry rows also used by worker heartbeats.
+	// Bound the whole transaction/retry sequence well below the default lease.
+	maintenanceOwnershipTimeout = 5 * time.Second
 )
 
 var (
@@ -109,6 +112,8 @@ func (s *IcebergMaintenanceStore) SyncMaintenanceReservations(
 	selectors []IcebergMaintenanceReservationSelector,
 	now time.Time,
 ) error {
+	ctx, cancel := context.WithTimeout(ctx, maintenanceOwnershipTimeout)
+	defer cancel()
 	return retryMaintenanceTransaction(ctx, func() error {
 		return s.syncMaintenanceReservations(ctx, ownerJobID, submissionID, kind, selectors, now)
 	})
@@ -137,11 +142,11 @@ func (s *IcebergMaintenanceStore) syncMaintenanceReservations(
 		return fmt.Errorf("at least one maintenance reservation selector is required")
 	}
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, cleanup, err := s.beginMaintenanceOwnershipTransaction(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer cleanup()
 	var currentSubmission string
 	if err := tx.QueryRowContext(ctx, `SELECT submission_id FROM job_registry WHERE job_id=? FOR UPDATE`, ownerJobID).Scan(&currentSubmission); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -243,6 +248,8 @@ func (s *IcebergMaintenanceStore) ReleaseMaintenanceReservations(
 	ownerJobID, submissionID string,
 	now time.Time,
 ) error {
+	ctx, cancel := context.WithTimeout(ctx, maintenanceOwnershipTimeout)
+	defer cancel()
 	return retryMaintenanceTransaction(ctx, func() error {
 		return s.releaseMaintenanceReservations(ctx, ownerJobID, submissionID, now)
 	})
@@ -258,11 +265,11 @@ func (s *IcebergMaintenanceStore) releaseMaintenanceReservations(
 	if ownerJobID == "" || submissionID == "" {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, cleanup, err := s.beginMaintenanceOwnershipTransaction(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT catalog FROM iceberg_maintenance_reservations
 		WHERE owner_job_id=? AND submission_id=? AND active=1`, ownerJobID, submissionID)
@@ -329,9 +336,7 @@ func (s *IcebergMaintenanceStore) releaseMaintenanceReservations(
 }
 
 func (s *IcebergMaintenanceStore) ReleaseMaintenanceReservationsExcept(ctx context.Context, _ map[string]string, now time.Time) error {
-	return retryMaintenanceTransaction(ctx, func() error {
-		return s.releaseMaintenanceReservationsExcept(ctx, now)
-	})
+	return s.releaseMaintenanceReservationsExcept(ctx, now)
 }
 
 func (s *IcebergMaintenanceStore) releaseMaintenanceReservationsExcept(ctx context.Context, now time.Time) error {
@@ -339,7 +344,6 @@ func (s *IcebergMaintenanceStore) releaseMaintenanceReservationsExcept(ctx conte
 	if err != nil {
 		return err
 	}
-	knownOwners := make(map[string]struct{})
 	var owners []string
 	for ownerRows.Next() {
 		var owner string
@@ -347,7 +351,6 @@ func (s *IcebergMaintenanceStore) releaseMaintenanceReservationsExcept(ctx conte
 			ownerRows.Close()
 			return err
 		}
-		knownOwners[owner] = struct{}{}
 		owners = append(owners, owner)
 	}
 	if err := ownerRows.Close(); err != nil {
@@ -357,21 +360,35 @@ func (s *IcebergMaintenanceStore) releaseMaintenanceReservationsExcept(ctx conte
 		return err
 	}
 	sort.Strings(owners)
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	for _, owner := range owners {
-		var locked string
-		err := tx.QueryRowContext(ctx, `SELECT job_id FROM job_registry WHERE job_id=? FOR UPDATE`, owner).Scan(&locked)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		// Commit each owner's cleanup independently. Waiting on one catalog
+		// must not retain registry locks for every active ingestion job.
+		ownerCtx, cancel := context.WithTimeout(ctx, maintenanceOwnershipTimeout)
+		err := retryMaintenanceTransaction(ownerCtx, func() error {
+			return s.releaseStaleMaintenanceReservationsForOwner(ownerCtx, owner, now)
+		})
+		cancel()
+		if err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func (s *IcebergMaintenanceStore) releaseStaleMaintenanceReservationsForOwner(ctx context.Context, owner string, now time.Time) error {
+	tx, cleanup, err := s.beginMaintenanceOwnershipTransaction(ctx)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	var locked string
+	err = tx.QueryRowContext(ctx, `SELECT job_id FROM job_registry WHERE job_id=? FOR UPDATE`, owner).Scan(&locked)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 
 	rows, err := tx.QueryContext(ctx, `SELECT owner_job_id, submission_id, reservation_kind, catalog
-		FROM iceberg_maintenance_reservations WHERE active=1 ORDER BY owner_job_id, submission_id, catalog`)
+		FROM iceberg_maintenance_reservations WHERE owner_job_id=? AND active=1 ORDER BY submission_id, catalog`, owner)
 	if err != nil {
 		return err
 	}
@@ -381,9 +398,6 @@ func (s *IcebergMaintenanceStore) releaseMaintenanceReservationsExcept(ctx conte
 		if err := rows.Scan(&owner, &submission, &kind, &catalog); err != nil {
 			rows.Close()
 			return err
-		}
-		if _, prelocked := knownOwners[owner]; !prelocked {
-			continue
 		}
 		key := owner + "\x00" + submission
 		pair := pairs[key]
@@ -541,11 +555,11 @@ func sortedStringSet(values map[string]struct{}) []string {
 func lockMaintenanceCatalogs(ctx context.Context, tx *sql.Tx, catalogs []string, now time.Time) error {
 	sort.Strings(catalogs)
 	for _, catalog := range catalogs {
-		if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO iceberg_maintenance_catalog_guards (catalog, updated_at) VALUES (?, ?)`, catalog, now.UTC()); err != nil {
-			return err
-		}
-		var locked string
-		if err := tx.QueryRowContext(ctx, `SELECT catalog FROM iceberg_maintenance_catalog_guards WHERE catalog=? FOR UPDATE`, catalog).Scan(&locked); err != nil {
+		// An upsert takes the exclusive record lock directly. INSERT IGNORE
+		// followed by FOR UPDATE can deadlock when two duplicate-key inserts
+		// both hold shared locks and then attempt to upgrade them.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO iceberg_maintenance_catalog_guards (catalog, updated_at) VALUES (?, ?)
+			ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at)`, catalog, now.UTC()); err != nil {
 			return err
 		}
 	}

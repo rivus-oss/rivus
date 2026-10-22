@@ -47,6 +47,70 @@ FROM job_registry
 WHERE job_id = '<affected job ID>';
 ```
 
+## Isolating lease renewal from slow metadata work
+
+Worker heartbeats now use a separate MySQL connection pool (at most four
+connections per process) from registry progress and claim operations. Renewal
+runs with up to four concurrent attempts, continues after individual errors,
+and includes the job ID in reported errors. The entire pass has a nominal
+budget of one-sixth of the configured lease duration, capped at five seconds.
+Each attempt receives that budget divided by `ceil(owned_jobs / 4)`, including
+best-effort release after ownership loss. With 29 jobs and a 30-second lease,
+there are eight waves with a 625 ms attempt deadline. This prevents multiple
+blocked waves from each consuming five seconds. Scheduler pauses and driver
+behavior can still delay execution beyond this nominal budget.
+
+The heartbeat pool retains four idle connections and sets its MySQL session
+`innodb_lock_wait_timeout=1`. Client cancellation alone does not immediately
+end a blocked server statement. Both claim and renewal calculate expiration
+with the metadata server's `UTC_TIMESTAMP(6)`; a row-lock wait within the SQL
+statement can still consume part of the lease. The existing `clientFoundRows`
+normalization and job/submission/owner predicates remain unchanged.
+
+The ownership predicates and write fence remain in place. A renewal timeout
+does not grant ownership or authorize writes after the durable lease expires.
+Regression tests cover a blocked renewal alongside healthy jobs, continuing
+after an individual failure, bounded attempts, and renewal while every shared
+registry connection is occupied.
+
+If measured production pauses exceed the default 30-second lease, operators
+can give workers more time to renew with `RIVUS_WORKER_LEASE_SECONDS=120` on
+both streaming and snapshot services. Apply this through a graceful worker
+replacement, then verify the effective lease and checkpoint advancement.
+This trades slower crash takeover (up to the lease duration) for greater
+tolerance of short metadata stalls; it does not repair a persistently
+unavailable database. Never simulate this setting by extending lease rows
+manually. Stagger simultaneous batch workloads and monitor memory/IO pressure
+at the host as well as metadata query latency.
+
+## Maintenance ownership locks
+
+Catalog guards use `INSERT ... ON DUPLICATE KEY UPDATE` to take an exclusive
+record lock directly. This avoids the shared-lock upgrade deadlock possible
+with `INSERT IGNORE` followed by `SELECT ... FOR UPDATE`. Catalog ordering and
+ownership checks are preserved.
+
+Stale reservation cleanup commits independently per owner and revalidates the
+registry submission/lifecycle under lock. It does not hold every active job's
+registry row while waiting on one catalog. Earlier owners may already have
+committed cleanup when a later owner fails; the next reconciliation safely
+rechecks the remaining work.
+
+Reservation sync/release and each cleanup owner have a five-second request
+context spanning retries. Their transactions temporarily use a one-second
+server row-lock timeout. The original session setting is restored before
+returning the connection to the shared pool; connections that cannot be
+restored are discarded. MySQL's timeout timer is coarse, so a final server
+wait/rollback can finish after the client deadline. This is not a hard
+real-time transaction limit or protection against host starvation.
+
+Regression tests in `pkg/meta/lease_contention_test.go` run only when
+`RIVUS_TEST_MYSQL_DSN` points to an isolated MySQL fixture. They cover eight
+concurrent catalog waiters, cleanup blocked on a stale owner while an unrelated
+heartbeat succeeds, database-clock claim/renewal, release of a registry lock
+after timeout, and restoration of pool session settings. Never point the test
+DSN at production. See [the recovery test runbook](../tests/recovery/README.md).
+
 ## Remaining limits
 
-Removing the polling scan does not guarantee availability during metadata outages, slow startup migrations, severe lock contention, process pauses, or clock discrepancies. Lease renewal still uses the existing orchestration and connection pool. Expired or changed ownership must continue to stop writes. The patch does not cancel catalog requests already in flight and does not automatically resubmit failed jobs.
+Removing the polling scan and isolating heartbeats do not guarantee availability during metadata outages, slow startup migrations, severe lock contention, process pauses, or clock discrepancies. All heartbeat connections can still be blocked by a database or host outage. Expired or changed ownership must continue to stop writes. The patch does not cancel catalog requests already in flight and does not automatically resubmit failed jobs.

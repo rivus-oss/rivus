@@ -1774,10 +1774,30 @@ func (m *JobManager) renewWorkerJobLeases(ctx context.Context, store meta.JobWor
 		}
 	}
 	m.mu.RUnlock()
-	for _, job := range owned {
-		renewed, err := store.RenewJobLease(ctx, job.Config.ID, job.SubmissionID(), m.workerID, m.workerLeaseDuration)
+	// Keep a slow registry row from holding up every other job's heartbeat.
+	// Bound each attempt, including SQL pool waits, so renewal can retry while
+	// the current lease is still valid. The ownership check remains unchanged.
+	const parallelRenewals = 4
+	waves := (len(owned) + parallelRenewals - 1) / parallelRenewals
+	if waves == 0 {
+		return nil
+	}
+	// Budget the entire pass, not just one attempt: with many blocked rows,
+	// a fixed five-second timeout per wave can exceed the lease itself.
+	budget := m.workerLeaseDuration / 6
+	if budget <= 0 || budget > 5*time.Second {
+		budget = 5 * time.Second
+	}
+	timeout := budget / time.Duration(waves)
+	if timeout <= 0 {
+		timeout = time.Nanosecond
+	}
+	renew := func(job *Job) error {
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		renewed, err := store.RenewJobLease(attemptCtx, job.Config.ID, job.SubmissionID(), m.workerID, m.workerLeaseDuration)
 		if err != nil {
-			return err
+			return fmt.Errorf("renew worker lease job=%s: %w", job.Config.ID, err)
 		}
 		if !renewed {
 			if job.runActive() {
@@ -1789,10 +1809,36 @@ func (m *JobManager) renewWorkerJobLeases(ctx context.Context, store meta.JobWor
 				job.setProgressListener(nil)
 				job.requestStop()
 			}
-			m.releaseWorkerLease(job.Config.ID, job.SubmissionID())
+			m.releaseWorkerLeaseAfterDrainContext(attemptCtx, job.Config.ID, job.SubmissionID(), false)
 		}
+		return nil
 	}
-	return nil
+	jobs := make(chan *Job, len(owned))
+	for _, job := range owned {
+		jobs <- job
+	}
+	close(jobs)
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var errs []error
+	for i := 0; i < parallelRenewals && i < len(owned); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				if err := renew(job); err != nil {
+					errMu.Lock()
+					errs = append(errs, err)
+					errMu.Unlock()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 func (m *JobManager) claimAndStartWorkerJobs(ctx context.Context, store meta.JobWorkerStore) error {
@@ -1969,6 +2015,12 @@ func (m *JobManager) releaseWorkerLease(jobID, submissionID string) {
 }
 
 func (m *JobManager) releaseWorkerLeaseAfterDrain(jobID, submissionID string, shutdownDrainComplete bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	m.releaseWorkerLeaseAfterDrainContext(ctx, jobID, submissionID, shutdownDrainComplete)
+}
+
+func (m *JobManager) releaseWorkerLeaseAfterDrainContext(ctx context.Context, jobID, submissionID string, shutdownDrainComplete bool) {
 	m.mu.Lock()
 	if _, restarting := m.restartResumeJobs[jobID]; !shutdownDrainComplete && m.shuttingDown && restarting {
 		// Shutdown must persist its final drained state while it still owns
@@ -1984,8 +2036,6 @@ func (m *JobManager) releaseWorkerLeaseAfterDrain(jobID, submissionID string, sh
 	if !ok || strings.TrimSpace(jobID) == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	if err := store.ReleaseJobLease(ctx, jobID, submissionID, m.workerID); err != nil {
 		log.Printf("[job-manager] release worker lease failed job=%s owner=%s: %v", jobID, m.workerID, err)
 	}
