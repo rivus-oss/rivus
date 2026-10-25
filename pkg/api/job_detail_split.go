@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -269,38 +268,4 @@ func durableMaintenanceOverallState(
 	default:
 		return "healthy"
 	}
-}
-
-func (s *Server) maintenanceStoreForView(ctx context.Context) (*meta.IcebergMaintenanceStore, error) {
-	s.maintenanceStoreOnce.Do(func() {
-		dsn := strings.TrimSpace(os.Getenv("RIVUS_META_MYSQL_DSN"))
-		if dsn == "" {
-			s.maintenanceStoreErr = fmt.Errorf("maintenance metadata store is not configured")
-			return
-		}
-		base := context.Background()
-		if ctx != nil {
-			base = context.WithoutCancel(ctx)
-		}
-		initCtx, cancel := context.WithTimeout(base, 3*time.Second)
-		defer cancel()
-		store, err := meta.NewIcebergMaintenanceStore(dsn)
-		if err != nil {
-			s.maintenanceStoreErr = err
-			return
-		}
-		if err := store.Init(initCtx); err != nil {
-			_ = store.Close()
-			s.maintenanceStoreErr = err
-			return
-		}
-		s.maintenanceStore = store
-	})
-	if s.maintenanceStoreErr != nil {
-		return nil, s.maintenanceStoreErr
-	}
-	if s.maintenanceStore == nil {
-		return nil, fmt.Errorf("maintenance metadata store is unavailable")
-	}
-	return s.maintenanceStore, nil
 }

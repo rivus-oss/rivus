@@ -43,7 +43,6 @@ func TestDurableMaintenanceViewIncludesPartitionEligibility(t *testing.T) {
 	}
 	defer db.ExecContext(ctx, "DELETE FROM iceberg_maintenance_state WHERE table_key=?", key)
 	server := &Server{maintenanceStore: store}
-	server.maintenanceStoreOnce.Do(func() {})
 	cfg := &config.JobConfig{ID: owner, Sink: &config.ConnectorSpec{Type: "iceberg_native", Config: map[string]any{
 		"table_maintenance": map[string]any{"enabled": true, "data_files_threshold": 50},
 	}}}

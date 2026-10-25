@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gerinsp/rivus/pkg/core"
 	"github.com/gerinsp/rivus/pkg/meta"
@@ -17,9 +19,11 @@ type Server struct {
 	runtimeStoreOnce     sync.Once
 	runtimeStore         runtimeInstanceReader
 	runtimeStoreErr      error
-	maintenanceStoreOnce sync.Once
+	maintenanceStoreMu   sync.Mutex
 	maintenanceStore     *meta.IcebergMaintenanceStore
 	maintenanceStoreErr  error
+	maintenanceRetryAt   time.Time
+	maintenanceStoreInit func(context.Context, string) (*meta.IcebergMaintenanceStore, error)
 	maintenanceMonitors  maintenanceMonitorRepository
 }
 

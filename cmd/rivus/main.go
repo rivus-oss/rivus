@@ -218,9 +218,27 @@ func runMaintenanceWorkerCommand(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	stopHeartbeat, err := startRuntimeHeartbeat(ctx, dsn, "maintenance", *workerID)
-	if err != nil {
-		return err
+	var stopHeartbeat func()
+	for delay := time.Second; ; delay = min(2*delay, 30*time.Second) {
+		var err error
+		stopHeartbeat, err = startRuntimeHeartbeat(ctx, dsn, "maintenance", *workerID)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		if !*queue || !meta.IsTransientMetadataError(err) {
+			return err
+		}
+		log.Printf("[maintenance-worker] runtime registry unavailable; retrying in %s: %v", delay, err)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
 	}
 	defer stopHeartbeat()
 	return iceberg.RunMaintenanceWorkerBounded(ctx, dsn, iceberg.MaintenanceWorkerOptions{

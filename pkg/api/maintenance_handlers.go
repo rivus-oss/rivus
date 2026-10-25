@@ -1,11 +1,9 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -246,35 +244,16 @@ func (s *Server) handleMaintenanceTableState(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) maintenanceAPIStore(w http.ResponseWriter) (*meta.IcebergMaintenanceStore, bool) {
-	s.maintenanceStoreOnce.Do(func() {
-		dsn := strings.TrimSpace(os.Getenv("RIVUS_META_MYSQL_DSN"))
-		if dsn == "" {
-			s.maintenanceStoreErr = fmt.Errorf("maintenance metadata store is not configured")
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		store, err := meta.NewIcebergMaintenanceStore(dsn)
-		if err != nil {
-			s.maintenanceStoreErr = err
-			return
-		}
-		if err := store.Init(ctx); err != nil {
-			store.Close()
-			s.maintenanceStoreErr = err
-			return
-		}
-		s.maintenanceStore = store
-	})
-	if s.maintenanceStoreErr != nil {
+	store, err := s.maintenanceStoreForView(nil)
+	if err != nil {
 		status := http.StatusInternalServerError
-		if strings.Contains(s.maintenanceStoreErr.Error(), "not configured") {
+		if strings.Contains(err.Error(), "not configured") {
 			status = http.StatusServiceUnavailable
 		}
-		maintenanceAPIError(w, s.maintenanceStoreErr, status)
+		maintenanceAPIError(w, err, status)
 		return nil, false
 	}
-	return s.maintenanceStore, true
+	return store, true
 }
 
 func maintenanceJobID(r *http.Request) string {

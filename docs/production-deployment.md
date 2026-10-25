@@ -25,6 +25,18 @@ Use one Rivus image with four runtime roles and one durable metadata database:
 
 The roles communicate through durable metadata rather than in-process state. The master does not execute CDC or snapshot pipelines.
 
+The maintenance queue worker backs off and retries transient metadata outages,
+including DNS failures, transaction deadlines, and deadlocks. It drains its
+executor pools before starting a new coordinator attempt; durable leases and
+commit reconciliation still decide which tasks may run again. Shutdown remains
+interruptible, while invalid configuration and ownership errors remain visible
+instead of being treated as metadata availability failures. One-shot maintenance
+commands continue to return their errors to the caller.
+
+The master shares one initialized maintenance store across API and job-detail
+requests. A failed initialization is retried after a short cooldown, so a startup
+timeout does not permanently break the monitor page until the master restarts.
+
 ## Image pinning
 
 Do not use `latest` for a production rollout.

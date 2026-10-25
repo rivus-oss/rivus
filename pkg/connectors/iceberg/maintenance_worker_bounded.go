@@ -15,11 +15,11 @@ import (
 	"github.com/gerinsp/rivus/pkg/meta"
 )
 
-// RunMaintenanceWorkerBounded keeps scheduling and inventory discovery in one
+// runMaintenanceWorkerBoundedOnce keeps scheduling and inventory discovery in one
 // lightweight coordinator loop, while queue execution is delegated to bounded
 // operation-specific pools. This lets snapshot expiration scale independently
 // without allowing compaction to fan out with it.
-func RunMaintenanceWorkerBounded(ctx context.Context, dsn string, opts MaintenanceWorkerOptions) error {
+func runMaintenanceWorkerBoundedOnce(ctx context.Context, dsn string, opts MaintenanceWorkerOptions) error {
 	if strings.TrimSpace(dsn) == "" {
 		return fmt.Errorf("RIVUS_META_MYSQL_DSN is required for maintenance-worker")
 	}
@@ -61,7 +61,9 @@ func RunMaintenanceWorkerBounded(ctx context.Context, dsn string, opts Maintenan
 		return err
 	}
 	defer store.Close()
-	if err := store.Init(ctx); err != nil {
+	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer initCancel()
+	if err := store.Init(initCtx); err != nil {
 		return fmt.Errorf("initialize maintenance store: %w", err)
 	}
 
@@ -70,9 +72,10 @@ func RunMaintenanceWorkerBounded(ctx context.Context, dsn string, opts Maintenan
 		return err
 	}
 	defer jobStore.Close()
-	if err := jobStore.Init(ctx); err != nil {
+	if err := jobStore.Init(initCtx); err != nil {
 		return fmt.Errorf("initialize job store: %w", err)
 	}
+	initCancel()
 
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	var executorWG sync.WaitGroup
