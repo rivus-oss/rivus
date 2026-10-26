@@ -73,6 +73,13 @@ jobs:
           RIVUS_COMPATIBILITY_BASELINE_BINARY: ${{ runner.temp }}/rivus-ff300c0.test
         run: go test -p=1 -tags=integration ./pkg/connectors/iceberg ./pkg/meta -run '^(TestCompatibilityReal|TestCompatibilitySchemaReal|TestNativeRebuildUpgradeReal|TestJobRebuildRealMySQL)' -count=1 -v -timeout=3m
 
+      - name: Test maintenance scheduling past deleted owners
+        env:
+          RIVUS_TEST_MYSQL_DSN: "root:recovery-test-only@tcp(127.0.0.1:49317)/maintenance_scheduler_test?parseTime=true"
+        run: |
+          docker compose -f tests/recovery/compose.yml exec -T metadata mysql --user=root --password=recovery-test-only -e 'CREATE DATABASE maintenance_scheduler_test'
+          go test -p=1 ./pkg/connectors/iceberg ./pkg/meta -run '^(TestEnqueueMaintenanceDoesNotStarveBehindDeletedOwners|TestEnqueueMaintenanceWithoutOwnersDoesNotQuery|TestEnqueueOrphanCleanupIncludesInactiveTables|TestMaintenanceDueStatesWithoutOwnersDoesNotQuery)$' -count=1 -v -timeout=2m
+
       - name: Remove isolated fixtures
         if: always()
         run: docker compose -f tests/recovery/compose.yml down --volumes

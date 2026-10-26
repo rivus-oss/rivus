@@ -641,7 +641,9 @@ func (s *IcebergMaintenanceStore) SetSnapshotCompleteForOwner(
 	return err
 }
 
-func (s *IcebergMaintenanceStore) DueStates(ctx context.Context, operation string, now time.Time, limit int) ([]IcebergMaintenanceState, error) {
+// DueStates filters to the coordinator's eligible owners before applying the
+// page limit. Deleted or disabled owners must not occupy every page forever.
+func (s *IcebergMaintenanceStore) DueStates(ctx context.Context, operation string, now time.Time, limit int, ownerIDs []string) ([]IcebergMaintenanceState, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -649,6 +651,16 @@ func (s *IcebergMaintenanceStore) DueStates(ctx context.Context, operation strin
 	if err != nil {
 		return nil, err
 	}
+	if len(ownerIDs) == 0 {
+		return []IcebergMaintenanceState{}, nil
+	}
+	ownerPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(ownerIDs)), ",")
+	args := make([]any, 0, len(ownerIDs)+2)
+	args = append(args, now.UTC())
+	for _, ownerID := range ownerIDs {
+		args = append(args, ownerID)
+	}
+	args = append(args, limit)
 	query := fmt.Sprintf(`SELECT table_key, catalog, namespace_name, table_name, owner_type, owner_job_id,
 	 snapshot_complete, last_snapshot_id, inventory_snapshot_id, last_inventory_at, last_write_at, new_data_files, new_equality_delete_files,
 	 active_data_files, active_small_files, active_small_bytes, active_equality_delete_files,
@@ -659,12 +671,14 @@ func (s *IcebergMaintenanceStore) DueStates(ctx context.Context, operation strin
 	 attempt_count, last_error, created_at, updated_at
 	FROM iceberg_maintenance_state AS state
 	WHERE snapshot_complete = 1 AND %s IS NOT NULL AND %s <= ?
+	  AND owner_type IN ('job', 'monitor')
+	  AND owner_job_id IN (%s)
 	  AND (owner_type <> 'monitor' OR EXISTS (
 	    SELECT 1 FROM iceberg_maintenance_monitors AS monitor
 	    WHERE monitor.monitor_id=SUBSTRING(state.owner_job_id, 9) AND monitor.status='ACTIVE'
 	  ))
-	ORDER BY %s ASC, table_key ASC LIMIT ?`, column, column, column)
-	rows, err := s.db.QueryContext(ctx, query, now.UTC(), limit)
+	ORDER BY %s ASC, table_key ASC LIMIT ?`, column, column, ownerPlaceholders, column)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -13,6 +13,7 @@ import (
 	"path"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -756,6 +757,14 @@ func maintenanceSnapshotComplete(ctx context.Context, store *meta.IcebergMainten
 }
 
 func enqueueDueMaintenance(ctx context.Context, store *meta.IcebergMaintenanceStore, jobs map[string]maintenanceWorkerJob, now time.Time, pageSize int) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	ownerIDs := make([]string, 0, len(jobs))
+	for ownerID := range jobs {
+		ownerIDs = append(ownerIDs, ownerID)
+	}
+	sort.Strings(ownerIDs)
 	operations := []struct {
 		name     string
 		priority int
@@ -765,7 +774,7 @@ func enqueueDueMaintenance(ctx context.Context, store *meta.IcebergMaintenanceSt
 		{name: "remove_orphan_files", priority: 40},
 	}
 	for _, operation := range operations {
-		states, err := store.DueStates(ctx, operation.name, now, pageSize)
+		states, err := store.DueStates(ctx, operation.name, now, pageSize, ownerIDs)
 		if err != nil {
 			return fmt.Errorf("query due %s states: %w", operation.name, err)
 		}

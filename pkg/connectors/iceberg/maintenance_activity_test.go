@@ -3,6 +3,7 @@ package iceberg
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -227,5 +228,87 @@ func TestEnqueueOrphanCleanupIncludesInactiveTables(t *testing.T) {
 	saved, err := store.GetState(ctx, state.TableKey)
 	if err != nil || saved == nil || saved.NextOrphanCheckAt == nil || saved.NextOrphanCheckAt.Before(now.Add(7*24*time.Hour)) || saved.NextOrphanCheckAt.After(now.Add(7*24*time.Hour+time.Hour)) {
 		t.Fatalf("idle cleanup was not rescheduled weekly: state=%+v err=%v", saved, err)
+	}
+}
+
+func TestEnqueueMaintenanceDoesNotStarveBehindDeletedOwners(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("RIVUS_TEST_MYSQL_DSN"))
+	if dsn == "" {
+		t.Skip("RIVUS_TEST_MYSQL_DSN is not set")
+	}
+	store, err := meta.NewIcebergMaintenanceStore(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	owner := "test-due-owner-" + now.Format("20060102150405.000000000")
+	deletedOwner := owner + "-deleted"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM iceberg_maintenance_tasks WHERE owner_job_id IN (?,?)", owner, deletedOwner)
+		_, _ = db.ExecContext(ctx, "DELETE FROM iceberg_maintenance_state WHERE owner_job_id IN (?,?)", owner, deletedOwner)
+		_ = db.Close()
+	})
+
+	// More than an entire page of older recovery states whose owner no longer
+	// exists must not prevent a current owner's later schedule from being read.
+	old := now.Add(-24 * time.Hour)
+	for i := 0; i < 101; i++ {
+		state := meta.IcebergMaintenanceState{
+			TableKey: fmt.Sprintf("%s.ns.old_%03d", owner, i), Catalog: owner,
+			Namespace: "ns", Table: fmt.Sprintf("old_%03d", i), OwnerType: "job",
+			OwnerJobID: deletedOwner, SnapshotComplete: true,
+		}
+		if err := store.UpsertState(ctx, state, old, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Obsolete ownership types are not schedulable even when their old owner
+	// ID happens to be present in the coordinator's map.
+	unmanaged := meta.IcebergMaintenanceState{
+		TableKey: owner + ".ns.unmanaged", Catalog: owner, Namespace: "ns",
+		Table: "unmanaged", OwnerType: "unmanaged", OwnerJobID: owner, SnapshotComplete: true,
+	}
+	if err := store.UpsertState(ctx, unmanaged, old, old, old); err != nil {
+		t.Fatal(err)
+	}
+	live := meta.IcebergMaintenanceState{
+		TableKey: owner + ".ns.current", Catalog: owner, Namespace: "ns",
+		Table: "current", OwnerType: "job", OwnerJobID: owner, SnapshotComplete: true,
+	}
+	due := now.Add(-time.Minute)
+	if err := store.UpsertState(ctx, live, due, due, due); err != nil {
+		t.Fatal(err)
+	}
+	jobs := map[string]maintenanceWorkerJob{owner: {Settings: defaultNativeMaintenanceSettings()}}
+	if err := enqueueDueMaintenance(ctx, store, jobs, now, 100); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"compact", "expire_snapshots", "remove_orphan_files"} {
+		var count int
+		err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM iceberg_maintenance_tasks
+			WHERE owner_job_id=? AND table_key=? AND operation=? AND status='queued'`, owner, live.TableKey, operation).Scan(&count)
+		if err != nil || count != 1 {
+			t.Fatalf("current owner's %s tasks=%d error=%v; want one queued task", operation, count, err)
+		}
+	}
+	var obsoleteTasks int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM iceberg_maintenance_tasks
+		WHERE owner_job_id=? OR table_key=?`, deletedOwner, unmanaged.TableKey).Scan(&obsoleteTasks); err != nil || obsoleteTasks != 0 {
+		t.Fatalf("obsolete owners queued %d tasks, error=%v; want zero", obsoleteTasks, err)
+	}
+}
+
+func TestEnqueueMaintenanceWithoutOwnersDoesNotQuery(t *testing.T) {
+	if err := enqueueDueMaintenance(context.Background(), nil, nil, time.Now(), 100); err != nil {
+		t.Fatal(err)
 	}
 }

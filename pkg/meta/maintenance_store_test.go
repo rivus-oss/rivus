@@ -1,10 +1,19 @@
 package meta
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestMaintenanceDueStatesWithoutOwnersDoesNotQuery(t *testing.T) {
+	states, err := (&IcebergMaintenanceStore{}).DueStates(context.Background(), "compact", time.Now(), 100, nil)
+	if err != nil || len(states) != 0 {
+		t.Fatalf("due states without owners = %v, %v; want empty", states, err)
+	}
+}
 
 func TestMaintenanceRunFilterWhereGlobal(t *testing.T) {
 	where, args := maintenanceRunFilterWhere(IcebergMaintenanceRunFilter{
