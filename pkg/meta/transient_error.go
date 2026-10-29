@@ -18,7 +18,7 @@ func IsTransientMetadataError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
-	for _, target := range []error{context.DeadlineExceeded, sql.ErrTxDone, driver.ErrBadConn, drivermysql.ErrInvalidConn, io.EOF, io.ErrUnexpectedEOF} {
+	for _, target := range []error{context.DeadlineExceeded, sql.ErrTxDone, driver.ErrBadConn, drivermysql.ErrInvalidConn, io.EOF, io.ErrUnexpectedEOF, ErrMaintenanceDiscoverySuperseded} {
 		if errors.Is(err, target) {
 			return true
 		}
