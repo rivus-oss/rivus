@@ -244,9 +244,10 @@ func (m *tableMaintenanceMonitor) publishDurableStatus(parent context.Context, s
 			status.TablesScanned++
 		}
 		status.Tables = append(status.Tables, connector.TableMaintenanceTableStatus{
+			Catalog:                       state.Catalog,
 			Namespace:                     state.Namespace,
 			Table:                         state.Table,
-			Identifier:                    state.Namespace + "." + state.Table,
+			Identifier:                    state.Catalog + "." + state.Namespace + "." + state.Table,
 			State:                         tableState,
 			ActiveDataFiles:               state.ActiveDataFiles,
 			ActiveEqualityDeleteFiles:     state.ActiveEqualityDeleteFiles,
@@ -498,9 +499,10 @@ func (m *tableMaintenanceMonitor) statusLocked(now time.Time) *connector.TableMa
 			latest = state.lastCheckedAt
 		}
 		status.Tables = append(status.Tables, connector.TableMaintenanceTableStatus{
+			Catalog:                       status.CatalogName,
 			Namespace:                     state.target.Namespace,
 			Table:                         state.target.Table,
-			Identifier:                    key,
+			Identifier:                    canonicalMaintenanceTableKey(status.CatalogName, state.target.Namespace, state.target.Table),
 			State:                         tableState,
 			ActiveDataFiles:               state.activeDataFiles,
 			ActiveEqualityDeleteFiles:     state.activeEqDeletes,

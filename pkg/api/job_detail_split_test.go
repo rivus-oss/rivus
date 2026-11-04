@@ -13,7 +13,7 @@ import (
 	"github.com/gerinsp/rivus/pkg/meta"
 )
 
-func TestDurableMaintenanceViewIncludesPartitionEligibility(t *testing.T) {
+func TestDurableMaintenanceViewIncludesCatalogAndPartitionEligibility(t *testing.T) {
 	dsn := os.Getenv("RIVUS_TEST_MYSQL_DSN")
 	if dsn == "" {
 		t.Skip("RIVUS_TEST_MYSQL_DSN is not set")
@@ -64,6 +64,43 @@ func TestDurableMaintenanceViewIncludesPartitionEligibility(t *testing.T) {
 		if !reflect.DeepEqual(rows[0]["partition_fields"], counts.partitions) {
 			t.Fatalf("partitioned, unpartitioned and unknown tables were conflated: %+v", rows[0])
 		}
+		if rows[0]["catalog"] != owner || rows[0]["identifier"] != key {
+			t.Fatalf("table catalog identity was lost: %+v", rows[0])
+		}
+	}
+
+	// A catalog-wide monitor can own identically named tables in different
+	// catalogs, as well as tables whose namespaces have multiple levels.
+	identities := map[string]meta.IcebergMaintenanceState{
+		key: {Catalog: owner, Namespace: "bronze", Table: "orders"},
+	}
+	for _, namespace := range []string{"bronze", "parent.bronze"} {
+		state := meta.IcebergMaintenanceState{
+			Catalog: "other-" + owner, Namespace: namespace, Table: "orders",
+			OwnerType: "monitor", OwnerJobID: owner, SnapshotComplete: true,
+		}
+		state.TableKey = state.Catalog + "." + namespace + ".orders"
+		if err := store.UpsertState(ctx, state, now, now, now); err != nil {
+			t.Fatal(err)
+		}
+		defer db.ExecContext(ctx, "DELETE FROM iceberg_maintenance_state WHERE table_key=?", state.TableKey)
+		identities[state.TableKey] = state
+	}
+	view, err := server.durableIcebergMaintenanceConfigView(ctx, cfg, owner, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := view["tables"].([]map[string]any)
+	if len(rows) != len(identities) {
+		t.Fatalf("table count = %d, want %d", len(rows), len(identities))
+	}
+	for _, row := range rows {
+		identifier, _ := row["identifier"].(string)
+		identity, ok := identities[identifier]
+		if !ok || row["catalog"] != identity.Catalog || row["namespace"] != identity.Namespace || row["table"] != identity.Table {
+			t.Fatalf("catalogs or nested namespaces were conflated: %+v", row)
+		}
+		delete(identities, identifier)
 	}
 }
 

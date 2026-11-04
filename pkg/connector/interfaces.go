@@ -115,6 +115,7 @@ type TableMaintenanceStatus struct {
 }
 
 type TableMaintenanceTableStatus struct {
+	Catalog                       string   `json:"catalog,omitempty"`
 	Namespace                     string   `json:"namespace"`
 	Table                         string   `json:"table"`
 	Identifier                    string   `json:"identifier"`

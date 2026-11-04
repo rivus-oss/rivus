@@ -232,7 +232,7 @@ func TestTableMaintenanceStatusSummarizesCurrentFileInventory(t *testing.T) {
 	if status.EligibleSmallFiles != 245 || status.EligibleSmallBytes != 576*1024*1024 {
 		t.Fatalf("eligible totals = files:%d bytes:%d", status.EligibleSmallFiles, status.EligibleSmallBytes)
 	}
-	if len(status.Tables) != 2 || status.Tables[0].Identifier != "analytics.customers" || status.Tables[1].State != "ready" {
+	if len(status.Tables) != 2 || status.Tables[0].Catalog != "asmat" || status.Tables[0].Identifier != "asmat.analytics.customers" || status.Tables[1].State != "ready" {
 		t.Fatalf("table status = %#v", status.Tables)
 	}
 	if status.CheckedAt != now.Add(-time.Minute).Format(time.RFC3339) {

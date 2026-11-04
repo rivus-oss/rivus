@@ -164,9 +164,10 @@ func (s *Server) durableIcebergMaintenanceConfigView(ctx context.Context, jobCfg
 		}
 
 		tables = append(tables, map[string]any{
+			"catalog":                          state.Catalog,
 			"namespace":                        state.Namespace,
 			"table":                            state.Table,
-			"identifier":                       state.Namespace + "." + state.Table,
+			"identifier":                       state.Catalog + "." + state.Namespace + "." + state.Table,
 			"state":                            tableState,
 			"active_data_files":                state.ActiveDataFiles,
 			"active_equality_delete_files":     state.ActiveEqualityDeleteFiles,

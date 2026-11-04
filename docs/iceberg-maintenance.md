@@ -64,6 +64,8 @@ Small-file totals span the whole table, while compaction eligibility is calculat
 
 The shared job/monitor inventory panel shows the current partition spec under each table name (`Partitioned · date` or `Unpartitioned`) and keeps the existing file counts and thresholds. The reason column reports planner eligibility separately. Partition information is collected during the inventory scan and stored with its counts; older inventory without that metadata shows `Partitioning pending scan` until refreshed. Table type is never inferred from its name, file count, or maintenance status.
 
+Table names include the catalog (`catalog.namespace.table`), including every level of a nested namespace. The API also exposes each row's `catalog` separately, so tables in different catalogs remain distinguishable in catalog-wide monitors and job details.
+
 Recommended configuration:
 
 ```yaml
