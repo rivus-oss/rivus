@@ -100,7 +100,7 @@ export function cleanupContent(maintenance, panel, owner, metric, pageSize = 100
       </div>
       <p class="mb-4 text-xs leading-5 text-slate-500">Next due is the scheduler deadline, not a guaranteed start time. Cleanup has its own status, independent of compaction inventory. Times use your browser timezone. Results below come from Rivus worker records.</p>
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2"><span class="text-xs text-slate-500">Rows ${rows.length ? start + 1 : 0}–${Math.min(start + pageSize, rows.length)} of ${fmtWholeNumber(rows.length)}${limited ? ` shown (${fmtWholeNumber(maintenance.tables_total)} total tables)` : ''}</span>${pagination}</div>
-      <div class="overflow-hidden rounded-[16px] border border-slate-200"><div class="max-h-[560px] overflow-auto"><table class="min-w-full text-xs">
+      <div class="overflow-hidden rounded-[16px] border border-slate-200"><div class="max-h-[560px] overflow-auto" data-scroll-key="${escapeHtml(JSON.stringify([owner, 'cleanup', op, page, query, filter]))}"><table class="min-w-full text-xs">
         <thead class="sticky top-0 z-10 bg-slate-50 text-slate-600"><tr class="border-b border-slate-200">${['Iceberg table', 'Last successful cleanup', 'Next due', 'Status', 'Latest attempt result', 'Reason'].map((label) => `<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em]">${label}</th>`).join('')}</tr></thead>
         <tbody class="bg-white">${rows.slice(start, start + pageSize).map(({ table, cleanup: c }) => {
           const key = table.table_key || table.identifier;

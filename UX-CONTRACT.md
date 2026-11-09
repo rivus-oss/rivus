@@ -37,6 +37,12 @@ must be readable in cells without relying on hover. This correction adds no
 cleanup execution actions or state transitions. Existing panel paging stays scoped to its owner;
 changing owner resets it.
 
+Polling updates preserve vertical and horizontal table scroll for the same owner,
+view, page, and cleanup filters. Job and monitor lists also preserve surviving
+scroll ancestors. Explicit owner/page/operation/filter changes start a new table
+viewport. Monitor ownership counts render inside the shared panel update so they
+do not cause an extra replacement or layout change after scroll restoration.
+
 ## Cleanup visibility
 
 - Orphan removal and snapshot expiration have independent schedules and task statuses.

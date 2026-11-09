@@ -176,9 +176,34 @@ export function setBoundText(name, value) {
   });
 }
 
-export function setInnerHTMLIfChanged(el, html) {
+export function setInnerHTMLIfChanged(el, html, { preserveScroll = false } = {}) {
   if (!el || el.innerHTML === html) return;
+  const ancestors = [];
+  const regions = new Map();
+  if (preserveScroll) {
+    // Existing ancestors survive replacement (including document scrolling).
+    // Nested table viewports need stable keys because their DOM nodes do not.
+    for (let node = el; node; node = node.parentElement) {
+      ancestors.push([node, node.scrollLeft, node.scrollTop]);
+    }
+    for (const node of el.querySelectorAll('[data-scroll-key]')) {
+      regions.set(node.getAttribute('data-scroll-key'), [node.scrollLeft, node.scrollTop]);
+    }
+  }
   el.innerHTML = html;
+  if (!preserveScroll) return;
+  const restore = (node, left, top) => {
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+    if (node.scrollLeft === left && node.scrollTop === top) return;
+    // Avoid the document's smooth-scroll styling animating each poll update.
+    if (typeof node.scrollTo === 'function') node.scrollTo({ left, top, behavior: 'instant' });
+    else { node.scrollLeft = left; node.scrollTop = top; }
+  };
+  for (const node of el.querySelectorAll('[data-scroll-key]')) {
+    const position = regions.get(node.getAttribute('data-scroll-key'));
+    if (position) restore(node, ...position);
+  }
+  for (const position of ancestors) restore(...position);
 }
 
 export function setJobsNotice(message, tone = 'info') {

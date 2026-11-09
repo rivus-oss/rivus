@@ -198,10 +198,10 @@ export async function loadJobs() {
     latestDorisArchiveJobs = dorisArchive.slice();
     latestIcebergArchiveJobs = icebergArchive.slice();
 
-    setInnerHTMLIfChanged(document.getElementById('dorisActiveBody'), dorisActive.map(rowTemplate).join(''));
-    setInnerHTMLIfChanged(document.getElementById('icebergActiveBody'), icebergActive.map(rowTemplate).join(''));
-    setInnerHTMLIfChanged(document.getElementById('dorisArchiveBody'), dorisArchive.map(rowTemplate).join(''));
-    setInnerHTMLIfChanged(document.getElementById('icebergArchiveBody'), icebergArchive.map(rowTemplate).join(''));
+    setInnerHTMLIfChanged(document.getElementById('dorisActiveBody'), dorisActive.map(rowTemplate).join(''), { preserveScroll: true });
+    setInnerHTMLIfChanged(document.getElementById('icebergActiveBody'), icebergActive.map(rowTemplate).join(''), { preserveScroll: true });
+    setInnerHTMLIfChanged(document.getElementById('dorisArchiveBody'), dorisArchive.map(rowTemplate).join(''), { preserveScroll: true });
+    setInnerHTMLIfChanged(document.getElementById('icebergArchiveBody'), icebergArchive.map(rowTemplate).join(''), { preserveScroll: true });
     document.getElementById('dorisActiveEmpty').classList.toggle('hidden', dorisActive.length !== 0);
     document.getElementById('icebergActiveEmpty').classList.toggle('hidden', icebergActive.length !== 0);
     document.getElementById('dorisArchiveEmpty').classList.toggle('hidden', dorisArchive.length !== 0);

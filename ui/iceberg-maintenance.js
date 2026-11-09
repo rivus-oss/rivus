@@ -140,6 +140,16 @@ function historyLink(job, options = {}) {
   return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="brand-outline-btn rounded-md px-3 py-1.5 text-xs font-semibold">${label}</a>`;
 }
 
+function ownershipSummary(items = []) {
+  if (!items.length) return '';
+  return `<div class="grid gap-3 border-b border-slate-200 bg-white px-5 py-4 sm:grid-cols-3 lg:grid-cols-6 sm:px-6">
+    ${items.map(([label, value]) => `<div>
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(label)}</div>
+      <div class="mono mt-1 text-lg font-semibold text-slate-900">${escapeHtml(Number(value))}</div>
+    </div>`).join('')}
+  </div>`;
+}
+
 export function renderIcebergMaintenance(job, options = {}) {
   const panel = options.panel || document.getElementById('icebergMaintenancePanel');
   if (!panel) return;
@@ -298,6 +308,7 @@ export function renderIcebergMaintenance(job, options = {}) {
       : 'border-slate-200 bg-slate-50 text-slate-600';
 
   setInnerHTMLIfChanged(panel, `
+    ${ownershipSummary(options.ownershipSummary)}
     <div class="border-b border-slate-200 px-5 py-4 sm:px-6">
       <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
@@ -338,7 +349,7 @@ export function renderIcebergMaintenance(job, options = {}) {
         ${pagination}
       </div>
       <div class="overflow-hidden rounded-[16px] border border-slate-200">
-        <div class="max-h-[560px] overflow-auto">
+        <div class="max-h-[560px] overflow-auto" data-scroll-key="${escapeHtml(JSON.stringify([pageOwner, 'compaction', currentPage]))}">
           <table class="min-w-full text-sm">
             <thead class="sticky top-0 z-10 bg-slate-50 text-slate-600">
               <tr class="border-b border-slate-200">
@@ -362,7 +373,7 @@ export function renderIcebergMaintenance(job, options = {}) {
     </div>
     `}
     </div>
-  `);
+  `, { preserveScroll: true });
 
   panel.querySelectorAll('[data-maintenance-view]').forEach((button) => {
     button.onclick = () => {

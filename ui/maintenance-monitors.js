@@ -100,7 +100,7 @@ export async function loadMaintenanceMonitors() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Unable to load monitors (${response.status})`);
     const monitors = Array.isArray(data.monitors) ? data.monitors : [];
-    setInnerHTMLIfChanged(body, monitors.map(monitorRow).join(''));
+    setInnerHTMLIfChanged(body, monitors.map(monitorRow).join(''), { preserveScroll: true });
     document.getElementById('maintenanceMonitorEmpty')?.classList.toggle('hidden', monitors.length > 0);
     document.querySelectorAll('[data-bind="maintenance-monitor-count"]').forEach((el) => {
       el.textContent = String(monitors.length);
@@ -203,6 +203,14 @@ export async function showMaintenanceMonitorDetails(id) {
   };
   renderIcebergMaintenance(job, {
     panel,
+    ownershipSummary: [
+      ['Discovered', monitor.discovered_count || 0],
+      ['Maintained here', monitor.owned_count ?? monitor.table_count ?? 0],
+      ['Used by streaming/snapshot', monitor.reserved_count || 0],
+      ['Excluded scopes', monitor.excluded_scope_count || 0],
+      ['Owned by another monitor', monitor.conflict_count || 0],
+      ['Retired', monitor.retired_count || 0],
+    ],
     historyOwnerID: `monitor:${monitor.id}`,
     historyLabel: 'Maintenance runs',
     refreshLabel: 'Refresh inventory',
@@ -213,23 +221,6 @@ export async function showMaintenanceMonitorDetails(id) {
     },
   });
 
-	const ownership = [
-		['Discovered', monitor.discovered_count || 0],
-		['Maintained here', monitor.owned_count ?? monitor.table_count ?? 0],
-		['Used by streaming/snapshot', monitor.reserved_count || 0],
-		['Excluded scopes', monitor.excluded_scope_count || 0],
-		['Owned by another monitor', monitor.conflict_count || 0],
-		['Retired', monitor.retired_count || 0],
-	];
-	panel.insertAdjacentHTML('afterbegin', `
-	  <div class="grid gap-3 border-b border-slate-200 bg-white px-5 py-4 sm:grid-cols-3 lg:grid-cols-6 sm:px-6">
-		${ownership.map(([label, value]) => `
-		  <div>
-			<div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(label)}</div>
-			<div class="mono mt-1 text-lg font-semibold text-slate-900">${escapeHtml(Number(value))}</div>
-		  </div>`).join('')}
-	  </div>
-	`);
 }
 
 export function closeMaintenanceMonitorDetails() {
