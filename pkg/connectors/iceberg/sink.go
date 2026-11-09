@@ -3671,6 +3671,11 @@ func (s *Sink) defaultTableProperties() iceberglib.Properties {
 	for key, value := range s.cfg.TableProperties {
 		props[key] = value
 	}
+	if enabled, versions := metadataCleanupPolicyConfig(s.cfg.TableMaintenance); enabled && (s.cfg.TableMaintenance.Enabled || s.cfg.TableMaintenance.NativeEnabled) && versions > 0 {
+		for key, value := range metadataCleanupProperties(versions) {
+			props[key] = value
+		}
+	}
 
 	if _, ok := props[icetable.PropertyFormatVersion]; !ok {
 		props[icetable.PropertyFormatVersion] = "2"

@@ -56,31 +56,33 @@ const (
 )
 
 type nativeMaintenanceSettings struct {
-	Enabled                 bool
-	Executor                string
-	DataFilesThreshold      int
-	EqualityDeleteThreshold int
-	PositionDeleteThreshold int
-	MaxSelectedInputBytes   int64
-	MaxSelectedFiles        int
-	MaxEqualityDeleteFiles  int
-	TargetFileSizeBytes     int64
-	SmallFileSizeBytes      int64
-	MinSmallFiles           int
-	MinSmallBytes           int64
-	ScanConcurrency         int
-	Timeout                 time.Duration
-	TempDirectory           string
-	ExpireInterval          time.Duration
-	SnapshotMaxAge          time.Duration
-	SnapshotRetainLast      int
-	OrphanInterval          time.Duration
-	OrphanInactiveInterval  time.Duration
-	OrphanMinAge            time.Duration
-	OrphanDryRun            bool
-	SparkPollInterval       time.Duration
-	SparkTimeout            time.Duration
-	IdleCompactionInterval  time.Duration
+	Enabled                     bool
+	Executor                    string
+	DataFilesThreshold          int
+	EqualityDeleteThreshold     int
+	PositionDeleteThreshold     int
+	MaxSelectedInputBytes       int64
+	MaxSelectedFiles            int
+	MaxEqualityDeleteFiles      int
+	TargetFileSizeBytes         int64
+	SmallFileSizeBytes          int64
+	MinSmallFiles               int
+	MinSmallBytes               int64
+	ScanConcurrency             int
+	Timeout                     time.Duration
+	TempDirectory               string
+	ExpireInterval              time.Duration
+	SnapshotMaxAge              time.Duration
+	SnapshotRetainLast          int
+	OrphanInterval              time.Duration
+	OrphanInactiveInterval      time.Duration
+	OrphanMinAge                time.Duration
+	OrphanDryRun                bool
+	MetadataCleanupEnabled      bool
+	MetadataPreviousVersionsMax int
+	SparkPollInterval           time.Duration
+	SparkTimeout                time.Duration
+	IdleCompactionInterval      time.Duration
 }
 
 type nativeTaskOutcome struct {
@@ -135,30 +137,32 @@ func (t compactionTriggers) Any() bool {
 func defaultNativeMaintenanceSettings() nativeMaintenanceSettings {
 	orphanInterval := durationEnv("RIVUS_MAINTENANCE_NATIVE_ORPHAN_INTERVAL_SECONDS", defaultNativeOrphanInterval)
 	return nativeMaintenanceSettings{
-		Executor:                maintenanceExecutorHybrid,
-		DataFilesThreshold:      intEnv("RIVUS_MAINTENANCE_DATA_FILES_THRESHOLD", defaultDataFilesThreshold),
-		EqualityDeleteThreshold: intEnv("RIVUS_MAINTENANCE_EQUALITY_DELETE_FILES_THRESHOLD", defaultEqualityDeleteFilesThreshold),
-		PositionDeleteThreshold: intEnv("RIVUS_MAINTENANCE_POSITION_DELETE_FILES_THRESHOLD", defaultPositionDeleteFilesThreshold),
-		MaxSelectedInputBytes:   int64Env("RIVUS_MAINTENANCE_NATIVE_MAX_SELECTED_INPUT_BYTES", defaultNativeMaxInputBytes),
-		MaxSelectedFiles:        intEnv("RIVUS_MAINTENANCE_NATIVE_MAX_SELECTED_FILES", defaultNativeMaxInputFiles),
-		MaxEqualityDeleteFiles:  intEnv("RIVUS_MAINTENANCE_NATIVE_MAX_EQUALITY_DELETE_FILES", defaultNativeMaxEqualityDeleteFiles),
-		TargetFileSizeBytes:     int64Env("RIVUS_MAINTENANCE_NATIVE_TARGET_FILE_SIZE_BYTES", defaultNativeTargetBytes),
-		SmallFileSizeBytes:      int64Env("RIVUS_MAINTENANCE_SMALL_FILE_SIZE_BYTES", defaultNativeSmallBytes),
-		MinSmallFiles:           intEnv("RIVUS_MAINTENANCE_SMALL_FILES_MIN_COUNT", defaultNativeMinSmallFiles),
-		MinSmallBytes:           int64Env("RIVUS_MAINTENANCE_SMALL_FILES_MIN_TOTAL_BYTES", defaultNativeMinSmallBytes),
-		ScanConcurrency:         intEnv("RIVUS_MAINTENANCE_NATIVE_SCAN_CONCURRENCY", 1),
-		Timeout:                 durationEnv("RIVUS_MAINTENANCE_NATIVE_TIMEOUT_SECONDS", defaultNativeTimeout),
-		TempDirectory:           firstNonEmpty(strings.TrimSpace(os.Getenv("RIVUS_MAINTENANCE_WORKER_TEMP_DIRECTORY")), "/tmp/rivus-maintenance"),
-		ExpireInterval:          durationEnv("RIVUS_MAINTENANCE_NATIVE_EXPIRE_INTERVAL_SECONDS", 24*time.Hour),
-		SnapshotMaxAge:          time.Duration(float64Env("RIVUS_MAINTENANCE_NATIVE_SNAPSHOT_MAX_AGE_HOURS", 168.0) * float64(time.Hour)),
-		SnapshotRetainLast:      intEnv("RIVUS_MAINTENANCE_NATIVE_SNAPSHOT_RETAIN_LAST", 10),
-		OrphanInterval:          orphanInterval,
-		OrphanInactiveInterval:  durationEnv("RIVUS_MAINTENANCE_NATIVE_ORPHAN_INACTIVE_INTERVAL_SECONDS", max(defaultNativeOrphanInactiveInterval, orphanInterval)),
-		OrphanMinAge:            time.Duration(float64Env("RIVUS_MAINTENANCE_NATIVE_ORPHAN_MIN_AGE_HOURS", defaultNativeOrphanAge.Hours()) * float64(time.Hour)),
-		OrphanDryRun:            boolEnv("RIVUS_MAINTENANCE_NATIVE_ORPHAN_DRY_RUN", false),
-		SparkPollInterval:       durationEnv("RIVUS_MAINTENANCE_SPARK_POLL_INTERVAL_SECONDS", 5*time.Second),
-		SparkTimeout:            durationEnv("RIVUS_MAINTENANCE_SPARK_TIMEOUT_SECONDS", 2*time.Hour),
-		IdleCompactionInterval:  durationEnv("RIVUS_MAINTENANCE_NATIVE_IDLE_CHECK_INTERVAL_SECONDS", 7*24*time.Hour),
+		Executor:                    maintenanceExecutorHybrid,
+		DataFilesThreshold:          intEnv("RIVUS_MAINTENANCE_DATA_FILES_THRESHOLD", defaultDataFilesThreshold),
+		EqualityDeleteThreshold:     intEnv("RIVUS_MAINTENANCE_EQUALITY_DELETE_FILES_THRESHOLD", defaultEqualityDeleteFilesThreshold),
+		PositionDeleteThreshold:     intEnv("RIVUS_MAINTENANCE_POSITION_DELETE_FILES_THRESHOLD", defaultPositionDeleteFilesThreshold),
+		MaxSelectedInputBytes:       int64Env("RIVUS_MAINTENANCE_NATIVE_MAX_SELECTED_INPUT_BYTES", defaultNativeMaxInputBytes),
+		MaxSelectedFiles:            intEnv("RIVUS_MAINTENANCE_NATIVE_MAX_SELECTED_FILES", defaultNativeMaxInputFiles),
+		MaxEqualityDeleteFiles:      intEnv("RIVUS_MAINTENANCE_NATIVE_MAX_EQUALITY_DELETE_FILES", defaultNativeMaxEqualityDeleteFiles),
+		TargetFileSizeBytes:         int64Env("RIVUS_MAINTENANCE_NATIVE_TARGET_FILE_SIZE_BYTES", defaultNativeTargetBytes),
+		SmallFileSizeBytes:          int64Env("RIVUS_MAINTENANCE_SMALL_FILE_SIZE_BYTES", defaultNativeSmallBytes),
+		MinSmallFiles:               intEnv("RIVUS_MAINTENANCE_SMALL_FILES_MIN_COUNT", defaultNativeMinSmallFiles),
+		MinSmallBytes:               int64Env("RIVUS_MAINTENANCE_SMALL_FILES_MIN_TOTAL_BYTES", defaultNativeMinSmallBytes),
+		ScanConcurrency:             intEnv("RIVUS_MAINTENANCE_NATIVE_SCAN_CONCURRENCY", 1),
+		Timeout:                     durationEnv("RIVUS_MAINTENANCE_NATIVE_TIMEOUT_SECONDS", defaultNativeTimeout),
+		TempDirectory:               firstNonEmpty(strings.TrimSpace(os.Getenv("RIVUS_MAINTENANCE_WORKER_TEMP_DIRECTORY")), "/tmp/rivus-maintenance"),
+		ExpireInterval:              durationEnv("RIVUS_MAINTENANCE_NATIVE_EXPIRE_INTERVAL_SECONDS", 24*time.Hour),
+		SnapshotMaxAge:              time.Duration(float64Env("RIVUS_MAINTENANCE_NATIVE_SNAPSHOT_MAX_AGE_HOURS", 168.0) * float64(time.Hour)),
+		SnapshotRetainLast:          intEnv("RIVUS_MAINTENANCE_NATIVE_SNAPSHOT_RETAIN_LAST", 10),
+		OrphanInterval:              orphanInterval,
+		OrphanInactiveInterval:      durationEnv("RIVUS_MAINTENANCE_NATIVE_ORPHAN_INACTIVE_INTERVAL_SECONDS", max(defaultNativeOrphanInactiveInterval, orphanInterval)),
+		OrphanMinAge:                time.Duration(float64Env("RIVUS_MAINTENANCE_NATIVE_ORPHAN_MIN_AGE_HOURS", defaultNativeOrphanAge.Hours()) * float64(time.Hour)),
+		OrphanDryRun:                boolEnv("RIVUS_MAINTENANCE_NATIVE_ORPHAN_DRY_RUN", false),
+		MetadataCleanupEnabled:      boolEnv("RIVUS_MAINTENANCE_METADATA_CLEANUP_ENABLED", false),
+		MetadataPreviousVersionsMax: intEnv("RIVUS_MAINTENANCE_METADATA_PREVIOUS_VERSIONS_MAX", 10),
+		SparkPollInterval:           durationEnv("RIVUS_MAINTENANCE_SPARK_POLL_INTERVAL_SECONDS", 5*time.Second),
+		SparkTimeout:                durationEnv("RIVUS_MAINTENANCE_SPARK_TIMEOUT_SECONDS", 2*time.Hour),
+		IdleCompactionInterval:      durationEnv("RIVUS_MAINTENANCE_NATIVE_IDLE_CHECK_INTERVAL_SECONDS", 7*24*time.Hour),
 	}
 }
 
@@ -316,6 +320,10 @@ func refreshPendingInventory(ctx context.Context, store *meta.IcebergMaintenance
 			return store.MarkInventoryMissing(ctx, state.TableKey)
 		}
 		return fmt.Errorf("load table: %w", err)
+	}
+	tbl, err = applyMetadataCleanupPolicy(ctx, tbl, settings)
+	if err != nil {
+		return err
 	}
 	inventory, err := scanActiveFileInventory(ctx, tbl, settings)
 	if err != nil {

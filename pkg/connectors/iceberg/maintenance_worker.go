@@ -865,6 +865,8 @@ func nativeMaintenanceSettingsFromRaw(sinkCfg any) (nativeMaintenanceSettings, e
 	settings.OrphanInactiveInterval = time.Duration(rawInt(maintenance, "native_orphan_inactive_interval_seconds", int(inactiveDefault/time.Second))) * time.Second
 	settings.OrphanMinAge = time.Duration(rawFloat64(maintenance, "native_orphan_min_age_hours", settings.OrphanMinAge.Hours()) * float64(time.Hour))
 	settings.OrphanDryRun = rawBool(maintenance, "native_orphan_dry_run", settings.OrphanDryRun)
+	settings.MetadataCleanupEnabled = rawBool(maintenance, "metadata_cleanup_enabled", settings.MetadataCleanupEnabled)
+	settings.MetadataPreviousVersionsMax = rawInt(maintenance, "metadata_previous_versions_max", settings.MetadataPreviousVersionsMax)
 	settings.SparkPollInterval = time.Duration(rawInt(maintenance, "spark_poll_interval_seconds", int(settings.SparkPollInterval/time.Second))) * time.Second
 	settings.SparkTimeout = time.Duration(rawInt(maintenance, "spark_timeout_seconds", int(settings.SparkTimeout/time.Second))) * time.Second
 	settings.IdleCompactionInterval = time.Duration(rawInt(maintenance, "native_idle_check_interval_seconds", int(settings.IdleCompactionInterval/time.Second))) * time.Second
@@ -909,6 +911,8 @@ func nativeMaintenanceSettingsFromRaw(sinkCfg any) (nativeMaintenanceSettings, e
 		return settings, fmt.Errorf("native_orphan_inactive_interval_seconds must be >= native_orphan_interval_seconds")
 	case settings.OrphanMinAge < defaultNativeOrphanAge:
 		return settings, fmt.Errorf("native_orphan_min_age_hours must be at least %.0f", defaultNativeOrphanAge.Hours())
+	case settings.MetadataCleanupEnabled && settings.MetadataPreviousVersionsMax < 1:
+		return settings, fmt.Errorf("metadata_previous_versions_max must be >= 1")
 	case settings.IdleCompactionInterval <= 0:
 		return settings, fmt.Errorf("native_idle_check_interval_seconds must be > 0")
 	}

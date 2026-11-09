@@ -35,4 +35,7 @@ sink:
       # Daily for active tables, weekly for idle tables; file age stays seven days.
       native_orphan_interval_seconds: 86400
       native_orphan_inactive_interval_seconds: 604800
+      # Opt in to bounded metadata JSON history on existing and discovered tables.
+      metadata_cleanup_enabled: true
+      metadata_previous_versions_max: 10
       native_orphan_min_age_hours: 168

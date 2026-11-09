@@ -137,6 +137,8 @@ type IcebergTableMaintenanceConfig struct {
 	NativeIdleCheckIntervalSeconds      int                            `yaml:"native_idle_check_interval_seconds" json:"native_idle_check_interval_seconds"`
 	NativeOrphanIntervalSeconds         int                            `yaml:"native_orphan_interval_seconds" json:"native_orphan_interval_seconds"`
 	NativeOrphanInactiveIntervalSeconds int                            `yaml:"native_orphan_inactive_interval_seconds" json:"native_orphan_inactive_interval_seconds"`
+	MetadataCleanupEnabled              *bool                          `yaml:"metadata_cleanup_enabled,omitempty" json:"metadata_cleanup_enabled,omitempty"`
+	MetadataPreviousVersionsMax         int                            `yaml:"metadata_previous_versions_max,omitempty" json:"metadata_previous_versions_max,omitempty"`
 	NativeMaxSelectedInputBytes         int64                          `yaml:"native_max_selected_input_bytes" json:"native_max_selected_input_bytes"`
 	NativeMaxSelectedFiles              int                            `yaml:"native_max_selected_files" json:"native_max_selected_files"`
 	NativeMaxEqualityDeleteFiles        int                            `yaml:"native_max_equality_delete_files" json:"native_max_equality_delete_files"`

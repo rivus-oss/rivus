@@ -53,7 +53,7 @@ func (s *IcebergMaintenanceStore) ListStatesForOwner(ctx context.Context, ownerJ
 	 attempt_count, last_error, created_at, updated_at
 	FROM iceberg_maintenance_state
 	WHERE owner_job_id=?
-	ORDER BY (last_error IS NOT NULL AND last_error<>'') DESC, namespace_name, table_name
+	ORDER BY (last_error IS NOT NULL AND last_error<>'') DESC, namespace_name, table_name, catalog, table_key
 	LIMIT ?`, ownerJobID, limit)
 	if err != nil {
 		return nil, err

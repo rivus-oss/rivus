@@ -435,6 +435,9 @@ func (s *IcebergMaintenanceStore) Init(ctx context.Context) error {
 	if err := s.ensureIndex(ctx, "iceberg_maintenance_tasks", "idx_maintenance_task_owner_status", "(owner_job_id, status, created_at, id)"); err != nil {
 		return err
 	}
+	if err := s.ensureIndex(ctx, "iceberg_maintenance_tasks", "idx_maintenance_task_table_op_id", "(table_key, operation, id)"); err != nil {
+		return err
+	}
 	if err := s.ensureIndex(ctx, "iceberg_maintenance_state", "idx_maintenance_state_inventory", "(snapshot_complete, last_inventory_at, next_inventory_check_at, inventory_lease_until)"); err != nil {
 		return err
 	}

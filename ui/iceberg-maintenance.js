@@ -5,6 +5,7 @@ import {
   formatDateTime,
   setInnerHTMLIfChanged,
 } from './core/api.js';
+import { cleanupContent, bindCleanupControls } from './iceberg-cleanup.js';
 
 function maintenanceConfig(job) {
   return job?.config?.sink?.config?.table_maintenance || {};
@@ -200,7 +201,13 @@ export function renderIcebergMaintenance(job, options = {}) {
   if (panel.dataset.maintenancePageOwner !== pageOwner) {
     panel.dataset.maintenancePageOwner = pageOwner;
     panel.dataset.maintenancePage = '1';
+    panel.dataset.maintenanceView = 'compaction';
+    panel.dataset.cleanupOperation = 'remove_orphan_files';
+    panel.dataset.cleanupStatus = '';
+    panel.dataset.cleanupSearch = '';
+    panel.dataset.cleanupPage = '1';
   }
+  const cleanupSelected = panel.dataset.maintenanceView === 'cleanup';
   const pageCount = Math.max(1, Math.ceil(tables.length / pageSize));
   const requestedPage = Number.parseInt(panel.dataset.maintenancePage || '1', 10);
   const currentPage = Math.min(pageCount, Math.max(1, Number.isFinite(requestedPage) ? requestedPage : 1));
@@ -297,17 +304,24 @@ export function renderIcebergMaintenance(job, options = {}) {
           <div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Iceberg Maintenance</div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded-full border px-3 py-1.5 text-xs font-semibold ${maintenanceStateClass(state)}">${escapeHtml(maintenanceStateLabel(state))}</span>
-          <span class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600">${escapeHtml(scanned)}</span>
+          ${cleanupSelected ? '' : `<span class="rounded-full border px-3 py-1.5 text-xs font-semibold ${maintenanceStateClass(state)}">${escapeHtml(maintenanceStateLabel(state))}</span>
+          <span class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600">${escapeHtml(scanned)}</span>`}
           <button type="button" data-maintenance-inventory-refresh class="brand-outline-btn rounded-md px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50" ${refreshDisabled ? 'disabled' : ''}>${escapeHtml(refreshLabel)}</button>
           ${historyLink(job, options)}
         </div>
       </div>
-      <div class="mt-3 text-xs text-slate-500">Last successful inventory check: <span class="font-semibold text-slate-700">${escapeHtml(checkedAt)}</span></div>
+      ${cleanupSelected ? '' : `<div class="mt-3 text-xs text-slate-500">Last successful inventory check: <span class="font-semibold text-slate-700">${escapeHtml(checkedAt)}</span></div>`}
     </div>
 
     ${workerConfigStrip(job, configuredEnabled, paused)}
 
+    <div class="border-b border-slate-200 px-5 py-3 sm:px-6">
+      <div class="inline-flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="tablist" aria-label="Maintenance operation">
+        ${['compaction', 'cleanup'].map((view) => `<button type="button" role="tab" tabindex="${cleanupSelected === (view === 'cleanup') ? '0' : '-1'}" aria-selected="${cleanupSelected === (view === 'cleanup')}" data-maintenance-view="${view}" class="rounded-md border px-4 py-2 text-xs font-semibold ${cleanupSelected === (view === 'cleanup') ? 'border-slate-300 bg-white text-slate-900' : 'border-transparent text-slate-500'}">${view === 'cleanup' ? 'Cleanup' : 'Compaction'}</button>`).join('')}
+      </div>
+    </div>
+    <div role="tabpanel" aria-label="${cleanupSelected ? 'Cleanup' : 'Compaction'}">
+    ${cleanupSelected ? cleanupContent(maintenance, panel, pageOwner, maintenanceMetric, pageSize) : `
     <div class="grid gap-3 bg-slate-50 px-5 py-4 sm:grid-cols-2 xl:grid-cols-5 sm:px-6">
       ${maintenanceMetric('Active data files', fmtWholeNumber(maintenance.active_data_files || 0))}
       ${maintenanceMetric('Applicable equality deletes', fmtWholeNumber(maintenance.applicable_equality_delete_files || 0), Number(maintenance.applicable_counts_pending || 0) ? `${fmtWholeNumber(maintenance.applicable_counts_pending)} tables pending scan` : '')}
@@ -346,7 +360,25 @@ export function renderIcebergMaintenance(job, options = {}) {
       </div>
       ${pagination ? `<div class="mt-3 flex justify-end">${pagination}</div>` : ''}
     </div>
+    `}
+    </div>
   `);
+
+  panel.querySelectorAll('[data-maintenance-view]').forEach((button) => {
+    button.onclick = () => {
+      panel.dataset.maintenanceView = button.dataset.maintenanceView;
+      renderIcebergMaintenance(job, options);
+    };
+    button.onkeydown = (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      panel.dataset.maintenanceView = event.key === 'Home' ? 'compaction' : event.key === 'End' ? 'cleanup'
+        : panel.dataset.maintenanceView === 'cleanup' ? 'compaction' : 'cleanup';
+      renderIcebergMaintenance(job, options);
+      panel.querySelector(`[data-maintenance-view="${panel.dataset.maintenanceView}"]`)?.focus();
+    };
+  });
+  if (cleanupSelected) bindCleanupControls(panel, pageOwner, () => renderIcebergMaintenance(job, options));
 
   const refreshButton = panel.querySelector('[data-maintenance-inventory-refresh]');
   if (refreshButton && typeof options.onRefreshInventory === 'function') {

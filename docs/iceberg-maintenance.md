@@ -2,6 +2,28 @@
 
 Rivus runs automatic Iceberg maintenance in a separate durable worker. The CDC/API server never owns the maintenance schedule.
 
+## Monitoring compaction and cleanup
+
+Job and monitor details share **Compaction** and **Cleanup** tabs. The compaction
+view shows file counts, thresholds, and planner eligibility. The cleanup view
+has an operation selector for orphan removal or snapshot expiration, table search,
+status filtering, and its own pagination.
+
+For each table, cleanup shows the last successful non-dry-run cleanup, the next
+durable due time, task status, latest attempt result, and failure/skip reason.
+“Next due” is not a promised start time: work can wait for scheduling, worker
+capacity, a retry deadline, or initial snapshot completion. Inventory freshness
+does not determine cleanup status. A skipped attempt is not a successful cleanup.
+When no successful result exists, the UI says so instead of guessing from the
+state's last-check timestamp. Snapshot expiration reports expired snapshots;
+its physical deletion counters are currently unmeasured, not zero.
+
+**View history** loads the latest ten recorded attempts for the selected table,
+owner, and operation without leaving Rivus. The authenticated read-only endpoint is
+`GET /api/iceberg/maintenance/cleanup/history?job_id=OWNER&table_key=KEY&operation=OPERATION&limit=10`.
+Only Rivus worker records appear here; independently submitted Spark jobs may
+not be present. This view does not alter retention, scheduling, or cleanup execution.
+
 ## Process model
 
 ```text
@@ -110,6 +132,8 @@ sink:
       # native orphan cleanup
       native_orphan_interval_seconds: 86400
       native_orphan_inactive_interval_seconds: 604800
+      metadata_cleanup_enabled: true
+      metadata_previous_versions_max: 10
       native_orphan_min_age_hours: 168
       native_orphan_dry_run: false
       worker_temp_directory: /tmp/rivus-maintenance

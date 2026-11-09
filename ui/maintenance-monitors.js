@@ -205,7 +205,7 @@ export async function showMaintenanceMonitorDetails(id) {
     panel,
     historyOwnerID: `monitor:${monitor.id}`,
     historyLabel: 'Maintenance runs',
-    refreshLabel: 'Run now',
+    refreshLabel: 'Refresh inventory',
     refreshDisabled: String(monitor.status || '').toUpperCase() !== 'ACTIVE',
     onRefreshInventory: async () => {
       await mutateMonitor(monitor.id, 'run');

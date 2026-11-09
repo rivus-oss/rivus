@@ -138,6 +138,14 @@ func (s *Server) durableIcebergMaintenanceConfigView(ctx context.Context, jobCfg
 	}
 
 	now := time.Now().UTC()
+	cleanupTasks, err := store.ListCleanupTasksForOwner(ctx, ownerID, 5000)
+	if err != nil {
+		return nil, err
+	}
+	cleanupByTable := make(map[string][]meta.CleanupTaskView)
+	for _, task := range cleanupTasks {
+		cleanupByTable[task.TableKey] = append(cleanupByTable[task.TableKey], task)
+	}
 	tables := make([]map[string]any, 0, len(states))
 	tablesReady := 0
 	inventoryScanning := false
@@ -163,7 +171,13 @@ func (s *Server) durableIcebergMaintenanceConfigView(ctx context.Context, jobCfg
 			checkedAt = state.LastInventoryAt.UTC().Format(time.RFC3339)
 		}
 
+		cleanup := make([]maintenanceCleanupView, 0, 2)
+		for _, task := range cleanupByTable[state.TableKey] {
+			cleanup = append(cleanup, cleanupOperationView(state, task, tm.Enabled, paused, now))
+		}
 		tables = append(tables, map[string]any{
+			"table_key":                        state.TableKey,
+			"cleanup":                          cleanup,
 			"catalog":                          state.Catalog,
 			"namespace":                        state.Namespace,
 			"table":                            state.Table,

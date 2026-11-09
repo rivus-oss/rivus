@@ -29,11 +29,26 @@ Visual ownership is recorded in `DESIGN.md`; runtime tokens remain in
 
 ## Navigation and layout
 
-Reuse the same renderer, existing eight columns, and existing pagination in both
-owner views. Keep the current table frame and internal scrolling. Explanations
+Reuse the same renderer in both owner views, with Compaction and Cleanup tabs.
+Compaction keeps its eight columns and pagination. Cleanup has independent
+operation, search, status, and paging controls. Keep the current table frame and
+internal scrolling. Explanations
 must be readable in cells without relying on hover. This correction adds no
-actions or state transitions. Existing panel paging stays scoped to its owner;
+cleanup execution actions or state transitions. Existing panel paging stays scoped to its owner;
 changing owner resets it.
+
+## Cleanup visibility
+
+- Orphan removal and snapshot expiration have independent schedules and task statuses.
+- Next due is the durable scheduler deadline, never a guaranteed start time.
+- A stale or failed inventory scan must not become a cleanup error.
+- Last successful cleanup comes from successful, non-dry-run task results. Skipped
+  attempts and the state's last-check timestamp are not successful cleanups.
+- History is read-only, scoped to the current table owner and selected operation.
+- Unknown deleted-file or byte counts show “not measured”; snapshot expiration
+  currently records expired snapshots without measuring reclaimed storage.
+- Both operations show their own failed/skipped reason, retry eligibility time,
+  and recent attempts. No payload or connection configuration is exposed.
 
 ## Verification
 

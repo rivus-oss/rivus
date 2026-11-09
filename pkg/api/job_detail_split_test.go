@@ -67,6 +67,10 @@ func TestDurableMaintenanceViewIncludesCatalogAndPartitionEligibility(t *testing
 		if rows[0]["catalog"] != owner || rows[0]["identifier"] != key {
 			t.Fatalf("table catalog identity was lost: %+v", rows[0])
 		}
+		cleanup := rows[0]["cleanup"].([]maintenanceCleanupView)
+		if len(cleanup) != 2 || cleanup[0].LastSuccessAt != nil || cleanup[1].LastResult != nil {
+			t.Fatalf("tables without cleanup history must still expose both schedules: %+v", cleanup)
+		}
 	}
 
 	// A catalog-wide monitor can own identically named tables in different
