@@ -24,9 +24,15 @@ var maintenanceMonitorIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]
 const maxMaintenanceMonitorIDLength = 247 // "monitor:" + ID must fit owner_job_id VARCHAR(255).
 
 const (
-	defaultMaintenanceDiscoveryInterval = 5 * time.Minute
-	maxDiscoveredMaintenanceTables      = 10000
+	defaultMaintenanceDiscoveryInterval   = 5 * time.Minute
+	defaultMaxDiscoveredMaintenanceTables = 10000
+	maxDiscoveredMaintenanceNamespaces    = 10000
+	maintenanceDiscoveryTableLimitEnv     = "RIVUS_MAINTENANCE_MAX_DISCOVERED_TABLES"
 )
+
+func maintenanceDiscoveryTableLimit() int {
+	return intEnv(maintenanceDiscoveryTableLimitEnv, defaultMaxDiscoveredMaintenanceTables)
+}
 
 // PrepareMaintenanceMonitorConfig validates and normalizes a standalone,
 // long-running Iceberg maintenance registration. It deliberately rejects a
@@ -341,6 +347,7 @@ func defaultDiscoveryPatterns(patterns []string) []string {
 }
 
 func discoverCatalogMonitorTargets(ctx context.Context, cfg *config.JobConfig, iceCfg config.IcebergConfig) ([]maintenanceMonitorTarget, error) {
+	maxTables := maintenanceDiscoveryTableLimit()
 	monitoring := iceCfg.TableMaintenance.CatalogMonitoring
 	catalogs, err := listGravitinoCatalogs(ctx, monitoring)
 	if err != nil {
@@ -381,8 +388,8 @@ func discoverCatalogMonitorTargets(ctx context.Context, cfg *config.JobConfig, i
 				continue
 			}
 			out = append(out, discovered)
-			if len(out) > maxDiscoveredMaintenanceTables {
-				return nil, fmt.Errorf("catalog monitoring selected more than %d tables", maxDiscoveredMaintenanceTables)
+			if len(out) > maxTables {
+				return nil, fmt.Errorf("catalog monitoring selected more than %d tables; increase %s or narrow the discovery patterns", maxTables, maintenanceDiscoveryTableLimitEnv)
 			}
 		}
 	}
@@ -567,6 +574,7 @@ type maintenanceDiscoveryCatalog interface {
 }
 
 func expandMaintenanceMonitorTargets(ctx context.Context, cat maintenanceDiscoveryCatalog, selectors []config.IcebergTarget, excludedNamespaces ...func(string) bool) ([]config.IcebergTarget, error) {
+	maxTables := maintenanceDiscoveryTableLimit()
 	var excludedNamespace func(string) bool
 	if len(excludedNamespaces) > 0 {
 		excludedNamespace = excludedNamespaces[0]
@@ -624,8 +632,8 @@ func expandMaintenanceMonitorTargets(ctx context.Context, cat maintenanceDiscove
 			}
 			key := discoveredNamespace + "\x00" + tableName
 			targets[key] = config.IcebergTarget{Namespace: discoveredNamespace, Table: tableName}
-			if len(targets) > maxDiscoveredMaintenanceTables {
-				return nil, fmt.Errorf("maintenance discovery selected more than %d tables", maxDiscoveredMaintenanceTables)
+			if len(targets) > maxTables {
+				return nil, fmt.Errorf("maintenance discovery selected more than %d tables; increase %s or narrow the discovery patterns", maxTables, maintenanceDiscoveryTableLimitEnv)
 			}
 		}
 	}
@@ -675,8 +683,8 @@ func listMaintenanceNamespaces(ctx context.Context, cat maintenanceDiscoveryCata
 			return nil, childErr
 		}
 		queue = append(queue, children...)
-		if len(seen)+len(queue) > maxDiscoveredMaintenanceTables {
-			return nil, fmt.Errorf("maintenance discovery found more than %d namespaces", maxDiscoveredMaintenanceTables)
+		if len(seen)+len(queue) > maxDiscoveredMaintenanceNamespaces {
+			return nil, fmt.Errorf("maintenance discovery found more than %d namespaces", maxDiscoveredMaintenanceNamespaces)
 		}
 	}
 	sort.Strings(out)

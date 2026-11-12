@@ -102,6 +102,7 @@ services:
     environment:
       <<: *rivus-environment
       RIVUS_WORKER_ID: ${RIVUS_MAINTENANCE_WORKER_ID:-}
+      RIVUS_MAINTENANCE_MAX_DISCOVERED_TABLES: ${RIVUS_MAINTENANCE_MAX_DISCOVERED_TABLES:-10000}
       RIVUS_LOG_DIR: ${RIVUS_MAINTENANCE_LOG_DIR:-/app/logs/maintenance}
       RIVUS_LOG_PREFIX: rivus-maintenance
     volumes:

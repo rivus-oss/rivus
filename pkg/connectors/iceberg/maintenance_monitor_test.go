@@ -292,6 +292,108 @@ func TestExpandMaintenanceMonitorTargetsSkipsExcludedNamespaceBeforeListingTable
 	}
 }
 
+func TestExpandMaintenanceMonitorTargetsHonorsDiscoveryTableLimit(t *testing.T) {
+	const tableCount = 10638
+	tables := make([]icetable.Identifier, tableCount)
+	for i := range tables {
+		tables[i] = icetable.Identifier{"analytics", fmt.Sprintf("table_%05d", i)}
+	}
+	cat := maintenanceDiscoveryCatalogStub{
+		tables: map[string][]icetable.Identifier{"analytics": tables},
+	}
+	for _, tc := range []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "default", wantErr: true},
+		{name: "larger_override", value: "50000"},
+		{name: "exact_boundary", value: "10638"},
+		{name: "over_boundary", value: "10637", wantErr: true},
+		{name: "invalid", value: "invalid", wantErr: true},
+		{name: "zero", value: "0", wantErr: true},
+		{name: "negative", value: "-1", wantErr: true},
+		{name: "whitespace", value: " 50000 "},
+		{name: "overflow", value: "999999999999999999999999999999", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("RIVUS_MAINTENANCE_MAX_DISCOVERED_TABLES", tc.value)
+			targets, err := expandMaintenanceMonitorTargets(context.Background(), cat, []config.IcebergTarget{{Namespace: "analytics", Table: "*"}})
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "RIVUS_MAINTENANCE_MAX_DISCOVERED_TABLES") {
+					t.Fatalf("expected actionable discovery limit error, got %v", err)
+				}
+				if targets != nil {
+					t.Fatal("failed discovery must not return partial membership")
+				}
+				return
+			}
+			if err != nil || len(targets) != tableCount {
+				t.Fatalf("discovered %d tables, error=%v; want %d tables", len(targets), err, tableCount)
+			}
+		})
+	}
+}
+
+func TestCatalogMonitorDiscoveryTableLimitSpansCatalogs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/metalakes/lakehouse/catalogs":
+			_, _ = w.Write([]byte(`{"code":0,"identifiers":[{"name":"first"},{"name":"second"}]}`))
+		case "/api/metalakes/lakehouse/catalogs/first", "/api/metalakes/lakehouse/catalogs/second":
+			_, _ = w.Write([]byte(`{"code":0,"catalog":{"type":"relational","provider":"lakehouse-iceberg"}}`))
+		case "/v1/config":
+			_, _ = w.Write([]byte(`{"defaults":{},"overrides":{}}`))
+		case "/v1/namespaces":
+			if r.URL.Query().Get("parent") == "" {
+				_, _ = w.Write([]byte(`{"namespaces":[["analytics"]]}`))
+			} else {
+				_, _ = w.Write([]byte(`{"namespaces":[]}`))
+			}
+		case "/v1/namespaces/analytics/tables":
+			_, _ = w.Write([]byte(`{"identifiers":[{"namespace":["analytics"],"name":"orders"},{"namespace":["analytics"],"name":"users"}]}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	cfg := maintenanceMonitorConfigForTest()
+	cfg.Sink.Config["rest_uri"] = server.URL
+	maintenance := cfg.Sink.Config["table_maintenance"].(map[string]any)
+	delete(maintenance, "tables")
+	maintenance["catalog_monitoring"] = map[string]any{
+		"enabled": true, "api_uri": server.URL, "metalake": "lakehouse",
+	}
+	normalized, _, err := PrepareMaintenanceMonitorConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iceCfg, err := decodeIcebergConfig(normalized.Sink.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []string{"3", "4"} {
+		t.Run(limit, func(t *testing.T) {
+			t.Setenv("RIVUS_MAINTENANCE_MAX_DISCOVERED_TABLES", limit)
+			targets, err := discoverCatalogMonitorTargets(context.Background(), normalized, iceCfg)
+			if limit == "3" {
+				if err == nil || !strings.Contains(err.Error(), "catalog monitoring selected more than 3 tables") || !strings.Contains(err.Error(), "RIVUS_MAINTENANCE_MAX_DISCOVERED_TABLES") {
+					t.Fatalf("expected aggregate discovery limit error, got %v", err)
+				}
+				if targets != nil {
+					t.Fatal("failed discovery must not return partial membership")
+				}
+				return
+			}
+			if err != nil || len(targets) != 4 {
+				t.Fatalf("discovered %d tables, error=%v; want 4 across two catalogs", len(targets), err)
+			}
+		})
+	}
+}
+
 func TestListGravitinoCatalogsFiltersPatternsAndProviders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

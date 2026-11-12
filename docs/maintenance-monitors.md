@@ -150,6 +150,32 @@ The monitor API reports:
 If discovery fails, Rivus keeps the last successful membership and reports the
 error. A successful empty discovery is different: it retires the old matches.
 
+### Discovery table limit
+
+`RIVUS_MAINTENANCE_MAX_DISCOVERED_TABLES` sets the maximum number of matching
+tables discovered per monitor across its catalogs. It defaults to `10000`;
+empty, invalid, zero, and negative values fall back to that default. Matching
+streaming/snapshot tables count toward the limit even though their maintenance
+is not owned by the monitor. The separate namespace discovery guard remains
+10,000 namespaces per catalog.
+
+For installations with more than 10,000 matching tables, set this in `.env`:
+
+```dotenv
+RIVUS_MAINTENANCE_MAX_DISCOVERED_TABLES=50000
+```
+
+Docker Compose forwards this setting to `rivus-maintenance`. Use an image built
+with support for this setting, then recreate the maintenance container:
+
+```sh
+docker compose up -d --force-recreate rivus-maintenance
+```
+
+A container restart alone does not reload `.env`. Discovery retries on its
+normal interval; a successful discovery updates membership and clears the
+discovery error. Raising this limit does not increase maintenance concurrency.
+
 ## API
 
 ```text
