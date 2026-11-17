@@ -373,7 +373,7 @@ func (s *Sink) reconcileTableSchemaOnce(
 			currentType,
 			change.Desired.Type,
 		)
-		if _, err := s.sqlDB.ExecContext(ctx, stmt); err != nil {
+		if err := s.execDDL(ctx, stmt); err != nil {
 			return fmt.Errorf("reconcile Doris schema %s.%s: %w | stmt=%s", targetDB, targetTable, err, stmt)
 		}
 		if err := s.waitForDorisSchemaChange(ctx, targetDB, targetTable, change); err != nil {

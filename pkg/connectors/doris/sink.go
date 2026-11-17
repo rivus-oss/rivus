@@ -492,18 +492,23 @@ func (s *Sink) applyDDL(ctx context.Context, targetDB, targetTable string, ev mo
 
 	log.Printf("[doris] apply translated DDL (%d stmt): %v", len(stmts), stmts)
 
-	return util.RetryWithBackoff(ctx, s.retry, func() error {
-		for _, st := range stmts {
-			st = strings.TrimSpace(st)
-			if st == "" {
-				continue
-			}
-			if _, err := s.sqlDB.ExecContext(ctx, st); err != nil {
+	for _, st := range stmts {
+		st = strings.TrimSpace(st)
+		if st == "" {
+			continue
+		}
+		// Retry only the failed statement so a later failure does not replay
+		// earlier ADD/DROP/RENAME operations that have already succeeded.
+		if err := util.RetryWithBackoff(ctx, s.retry, func() error {
+			if err := s.execDDL(ctx, st); err != nil {
 				return fmt.Errorf("exec ddl failed: %w | stmt=%s", err, st)
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 type streamLoadResp struct {
