@@ -99,7 +99,7 @@ func ValidateIcebergSnapshotRebuild(cfg *JobConfig) error {
 			}
 		}
 		for pattern, tableConfig := range source.TableConfigs {
-			if strings.TrimSpace(tableConfig.Filter) != "" && matches(pattern, true) {
+			if (strings.TrimSpace(tableConfig.Filter) != "" || tableConfig.SnapshotCutoff != nil) && matches(pattern, true) {
 				return fmt.Errorf("full snapshot rebuild requires removing source snapshot filter for %s", selection)
 			}
 		}

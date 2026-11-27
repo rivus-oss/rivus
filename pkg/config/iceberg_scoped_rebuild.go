@@ -119,12 +119,19 @@ func validateScopedIcebergRebuild(cfg *JobConfig) error {
 	if err := decode(cfg.Sink.Config, &sink); err != nil {
 		return err
 	}
-	if strings.TrimSpace(sink.TrinoDelete.URI) == "" || len(sink.SnapshotReplaceFilters) == 0 {
+	hasAutomaticCutoff := false
+	for _, tableCfg := range source.TableConfigs {
+		hasAutomaticCutoff = hasAutomaticCutoff || tableCfg.SnapshotCutoff != nil
+	}
+	if strings.TrimSpace(sink.TrinoDelete.URI) == "" || (len(sink.SnapshotReplaceFilters) == 0 && !hasAutomaticCutoff) {
 		return fmt.Errorf("scoped Trino rebuild requires coordinator configuration and matching replacement filters")
 	}
 	mode := strings.ToLower(strings.TrimSpace(sink.SnapshotWriteMode))
-	if mode != "auto" && mode != IcebergRebuildScopedWriteMode && mode != IcebergRebuildScopedNativeWriteMode {
+	if mode != "auto" && mode != IcebergSnapshotAutoCutoffWriteMode && mode != IcebergRebuildScopedWriteMode && mode != IcebergRebuildScopedNativeWriteMode {
 		return fmt.Errorf("scoped Trino rebuild requires auto snapshot mode")
+	}
+	if mode == IcebergSnapshotAutoCutoffWriteMode && !hasAutomaticCutoff {
+		return fmt.Errorf("%s requires source snapshot_cutoff settings", IcebergSnapshotAutoCutoffWriteMode)
 	}
 	selections := append([]string(nil), source.Tables...)
 	if source.Database != "" && source.Table != "" {
@@ -146,6 +153,17 @@ func validateScopedIcebergRebuild(cfg *JobConfig) error {
 		}
 		filter := rebuildConfigMatch(sink.SnapshotReplaceFilters, selection)
 		sourceCfg := rebuildSourceConfigMatch(source.TableConfigs, selection)
+		if sourceCfg != nil && sourceCfg.SnapshotCutoff != nil {
+			if err := ValidateMySQLSnapshotCutoff(*sourceCfg); err != nil {
+				return fmt.Errorf("scoped rebuild %s: %w", selection, err)
+			}
+			if filter != nil {
+				return fmt.Errorf("scoped rebuild %s: snapshot_cutoff generates its replacement filter; remove the manual replacement filter", selection)
+			}
+			// The runtime resolver freezes and validates both generated predicates
+			// before sink construction and before the first destructive reset.
+			continue
+		}
 		expression := ""
 		if sourceCfg != nil {
 			expression = sourceCfg.Filter

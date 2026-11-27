@@ -44,6 +44,11 @@ Keep the qualification record with the deployment configuration so future upgrad
 
 ## MySQL source expectations
 
+For regularly archived tables with sparse old rows, see
+[automatic snapshot cutoffs](automatic-snapshot-cutoff.md). The optional
+source setting generates matching MySQL and Iceberg snapshot scopes and freezes
+them for the submission.
+
 Rivus requires a source that supports the MySQL binlog protocol used by `go-mysql` and permits the configured Rivus account to read required schema/table data and replication events.
 
 Before production use, verify:
@@ -75,6 +80,12 @@ For split-runtime deployments, keep catalog and object-store configuration consi
 - maintenance worker.
 
 Catalog-specific behavior can vary. Validate namespace/table creation, commit behavior, schema evolution used by your jobs, object-store access, and maintenance operations against the exact catalog implementation you deploy.
+
+Incompatible source type changes, such as `LayoutPromo INT` becoming `VARCHAR(255)`, require explicit `auto_migration` settings on the Iceberg sink. Set `enabled: true` and list exact source `schema.table` names in `tables`; wildcards are rejected. Rewrites default to a 1 GiB active-file limit (`max_table_bytes`) and a 900-second timeout (`timeout_seconds`). Native Iceberg widening promotions do not require this opt-in. `allow_unsafe_type_changes` alone does not authorize a data rewrite.
+
+For supported conversions, Rivus replaces the field with a new internal ID, preserves its visible name and position, and rewrites current logical rows in one catalog transaction. This applies to DDL events and startup schema reconciliation. Supported conversion families include text with numeric, boolean, date/timestamp or binary values, numeric/boolean conversions, and date/timestamp conversions; parsing failures, overflow, precision loss and unsupported casts stop the migration. The scan applies existing deletes, preserves NULLs and converts bounded Arrow batches. Original schemas and files remain referenced by historical snapshots. Concurrent table changes reject a stale transaction.
+
+Automatic rewriting rejects identifier fields and current partition or sort sources; these require a planned target rebuild. It rewrites the whole affected table, even if source snapshot filters are configured. It does not recover purged MySQL binlogs or advance the source checkpoint. Follow [checkpoint recovery](iceberg-checkpoint-recovery.md#operator-recovery) separately when source history is missing.
 
 ## Doris expectations
 

@@ -190,6 +190,12 @@ type SnapshotFilterExpressionProvider interface {
 	SnapshotFilterExpression(schema, table string) string
 }
 
+// Resolve source/target snapshot predicates before constructing the sink.
+// The returned config is runtime-only: stored job config and state keys stay stable.
+type SnapshotScopeResolver interface {
+	ResolveSnapshotScope(context.Context, JobContext) (any, error)
+}
+
 // Validate all selected tables before any reset, including empty sources.
 type ScopedSnapshotTargetResetter interface {
 	ValidateSnapshotSourceTable(context.Context, string, string, string) error

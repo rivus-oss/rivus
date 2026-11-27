@@ -101,6 +101,12 @@ func (a *sourceAdapter) SnapshotFilterExpression(schema, table string) string {
 	return a.inner.snapshotFilterForTable(schema, table)
 }
 
+func (a *sourceAdapter) ResolveSnapshotScope(ctx context.Context, jctx connector.JobContext) (any, error) {
+	return a.inner.resolveSnapshotCutoffs(ctx, jctx)
+}
+
+func (a *sourceAdapter) Close() error { return a.inner.Close() }
+
 func (a *sourceAdapter) FetchSchema(ctx context.Context, schema, table string) (*model.TableSchema, error) {
 	return a.inner.FetchSchemaFor(ctx, schema, table)
 }

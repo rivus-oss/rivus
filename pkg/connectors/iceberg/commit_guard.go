@@ -106,7 +106,7 @@ func (s *Sink) guardedIcebergCommit(ctx context.Context, progress commitProgress
 		Kind: batch.kind, SnapshotTable: batch.snapshotTable,
 		SnapshotStartOffset: batch.snapshotStart, SnapshotEndOffset: batch.snapshotEnd,
 		Status:      meta.IcebergCommitPrepared,
-		SourceTable: progress.sourceKey, TargetNamespace: progress.targetNamespace, TargetTable: progress.targetTable, Operation: progress.operation, ReplayKeys: batch.replayKeys,
+		SourceTable: progress.sourceKey, TargetNamespace: progress.targetNamespace, TargetTable: progress.targetTable, TargetUUID: progress.targetUUID, Operation: progress.operation, ReplayKeys: batch.replayKeys,
 	}
 	if s.scopedNativeWrites && batch.kind == "snapshot" {
 		intent.BatchID = meta.ScopedNativeSnapshotBatchID(s.scopedRebuildToken, batch.snapshotTable, batch.snapshotStart, batch.snapshotEnd)

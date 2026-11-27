@@ -60,6 +60,11 @@ func CleanupOrphanFilesForJobConfig(ctx context.Context, jobID string, jobCfg *c
 	if err != nil {
 		return nil, err
 	}
+	// This catalog/file cleanup path never runs a source snapshot or sink Run.
+	// It needs no source predicate to inspect orphan files.
+	if iceCfg.SnapshotWriteMode == config.IcebergSnapshotAutoCutoffWriteMode {
+		iceCfg.SnapshotWriteMode = snapshotWriteModeAuto
+	}
 	sink, err := NewSink(jobID, "", strings.TrimSpace(jobCfg.Name), iceCfg, jobCfg.Retry, nil, nil)
 	if err != nil {
 		return nil, err
