@@ -18,6 +18,10 @@ func Register(reg *connector.Registry) {
 		if err != nil {
 			return nil, err
 		}
+		icfg.AutoMigration, err = resolveAutoMigrationTables(icfg.AutoMigration, jctx.SourceTables)
+		if err != nil {
+			return nil, err
+		}
 		native := icfg.SnapshotWriteMode == config.IcebergRebuildScopedNativeWriteMode
 		icfg, err = rebuildSnapshotConfig(jctx, icfg)
 		if err != nil {

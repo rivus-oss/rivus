@@ -15,6 +15,10 @@ type scopeTestSource struct {
 	resolveErr error
 }
 
+func (s *scopeTestSource) Tables() []connector.TableRef {
+	return []connector.TableRef{{Schema: "app", Table: "orders"}, {Schema: "archive", Table: "orders"}}
+}
+
 func (s *scopeTestSource) ResolveSnapshotScope(ctx context.Context, jctx connector.JobContext) (any, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -34,6 +38,9 @@ func TestSnapshotScopeIsResolvedBeforeSinkConstruction(t *testing.T) {
 			built := 0
 			reg.RegisterSink("test_sink", func(jctx connector.JobContext, cfg any) (connector.Sink, error) {
 				built++
+				if len(jctx.SourceTables) != 2 || jctx.SourceTables[0].Schema != "app" || jctx.SourceTables[1].Schema != "archive" {
+					t.Error("sink did not receive the resolved source table selection")
+				}
 				if cfg.(map[string]any)["cutoff"] != "2026-10-01" || jctx.SinkConfig.(map[string]any)["cutoff"] != "2026-10-01" {
 					t.Error("sink did not receive the resolved scope")
 				}

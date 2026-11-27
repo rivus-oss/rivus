@@ -267,11 +267,12 @@ type IcebergConfig struct {
 	SnapshotCutoffResolved bool `yaml:"-" json:"-"`
 }
 
-// IcebergAutoMigrationConfig authorizes bounded data rewrites for explicitly
-// selected source tables. Normal Iceberg schema promotions do not need this.
+// IcebergAutoMigrationConfig authorizes bounded data rewrites for selected
+// source tables. Omitted Tables inherits the concrete source selection at startup.
+// Normal Iceberg schema promotions do not need this.
 type IcebergAutoMigrationConfig struct {
 	Enabled        bool     `yaml:"enabled" json:"enabled"`
-	Tables         []string `yaml:"tables" json:"tables"`
+	Tables         []string `yaml:"tables,omitempty" json:"tables,omitempty"`
 	MaxTableBytes  ByteSize `yaml:"max_table_bytes" json:"max_table_bytes"`
 	TimeoutSeconds int      `yaml:"timeout_seconds" json:"timeout_seconds"`
 }

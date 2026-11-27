@@ -28,8 +28,6 @@ sink:
     snapshot_write_mode: auto-cutoff-v1
     auto_migration:
       enabled: true
-      tables:
-        - app.orders
       max_table_bytes: 1GB
       timeout_seconds: 900
     snapshot_replace_delete_executor: trino
