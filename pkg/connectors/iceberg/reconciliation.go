@@ -75,7 +75,7 @@ func recoverableDataOperation(op string) bool {
 }
 
 func recoverableMetadataOperation(op string) bool {
-	return op == "schema" || op == "create_table" || op == "snapshot-rolling-properties"
+	return op == "schema" || op == "schema-rewrite" || op == "create_table" || op == "snapshot-rolling-properties"
 }
 
 // Only positive catalog evidence is conclusive. Absence may mean a request is
@@ -112,7 +112,7 @@ func (s *Sink) loadProvenIcebergTable(ctx context.Context, intent meta.IcebergCo
 		return nil, fmt.Errorf("native recovery target generation changed")
 	}
 	key, want := "rivus.commit."+intent.OperationID, icebergIntentFingerprint(intent)
-	if recoverableMetadataOperation(intent.Operation) {
+	if recoverableMetadataOperation(intent.Operation) && intent.Operation != "schema-rewrite" {
 		if tbl.Properties()[key] == want {
 			return tbl, nil
 		}

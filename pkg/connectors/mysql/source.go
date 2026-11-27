@@ -49,6 +49,11 @@ type Source struct {
 }
 
 func NewSource(jobID, stateKey string, cfg config.MySQLConfig, retry config.RetryPolicy, offsetSto meta.OffsetStore, progress connector.ProgressReporter) (*Source, error) {
+	for table, tableCfg := range cfg.TableConfigs {
+		if err := config.ValidateMySQLSnapshotCutoff(tableCfg); err != nil {
+			return nil, fmt.Errorf("table %s: %w", table, err)
+		}
+	}
 	log.Printf("[mysql][SIGNATURE] NEW BUILD %s", time.Now().Format(time.RFC3339Nano))
 
 	// Note: DSN butuh 1 database. Untuk multi-db, kita pakai cfg.Database (legacy) kalau ada,
@@ -1440,6 +1445,9 @@ type snapshotCursorValue struct {
 }
 
 func (s *Source) RunInitialSnapshotAll(ctx context.Context, out chan<- model.Event) error {
+	if err := s.requireResolvedSnapshotCutoffs(); err != nil {
+		return err
+	}
 	totalTables := len(s.cfg.Tables)
 	for i, full := range s.cfg.Tables {
 		if s.shouldSkipSnapshotTable(full) {
@@ -1469,6 +1477,9 @@ func (s *Source) RunInitialSnapshotAll(ctx context.Context, out chan<- model.Eve
 }
 
 func (s *Source) ResumeInitialSnapshotAll(ctx context.Context, out chan<- model.Event) error {
+	if err := s.requireResolvedSnapshotCutoffs(); err != nil {
+		return err
+	}
 	startTable := ""
 	resume := snapshotResumeState{}
 
@@ -1874,6 +1885,9 @@ func (s *Source) buildSnapshotPlan(ctx context.Context, dbName, tblName string) 
 }
 
 func (s *Source) CountRows(ctx context.Context, dbName, tblName string) (int64, error) {
+	if err := s.requireResolvedSnapshotCutoffs(); err != nil {
+		return 0, err
+	}
 	query := fmt.Sprintf(
 		"SELECT COUNT(*) FROM `%s`.`%s`",
 		escapeMySQLIdentifier(dbName),
@@ -2827,6 +2841,9 @@ func (s *Source) RunFullWithStoredMode(ctx context.Context, out chan<- model.Eve
 
 // RunFull
 func (s *Source) runFull(ctx context.Context, out chan<- model.Event, mode config.JobMode, storedMode config.JobMode) error {
+	if err := s.requireResolvedSnapshotCutoffs(); err != nil {
+		return err
+	}
 	switch mode {
 
 	// =========================

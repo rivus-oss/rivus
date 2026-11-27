@@ -1,0 +1,42 @@
+id: example-mysql-to-iceberg-auto-cutoff
+name: MySQL archived tables with automatic snapshot cutoffs
+mode: initial
+
+source:
+  type: mysql
+  config:
+    addr: "${MYSQL_SOURCE_ADDR}"
+    user: "${MYSQL_SOURCE_USER}"
+    password: "${MYSQL_SOURCE_PASSWORD}"
+    tables:
+      - app.orders
+    table_configs:
+      app.orders:
+        snapshot_cutoff:
+          column: created_at
+          min_month_rows: 10000
+          min_growth_ratio: 10
+          lookback_months: 24
+          query_timeout_seconds: 30
+
+sink:
+  type: iceberg_native
+  config:
+    rest_uri: "${ICEBERG_REST_URI}"
+    warehouse: "${ICEBERG_WAREHOUSE}"
+    default_namespace: analytics
+    snapshot_write_mode: auto-cutoff-v1
+    auto_migration:
+      enabled: true
+      tables:
+        - app.orders
+      max_table_bytes: 1GB
+      timeout_seconds: 900
+    snapshot_replace_delete_executor: trino
+    trino_delete:
+      uri: "${TRINO_URI}"
+      catalog: "${TRINO_CATALOG}"
+      user: rivus
+
+meta:
+  mysql_dsn: "${MYSQL_META_DSN}"

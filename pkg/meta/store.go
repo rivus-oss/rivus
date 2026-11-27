@@ -128,6 +128,9 @@ CREATE TABLE IF NOT EXISTS job_snapshot_progress (
 	if _, err := s.sqlRunner().ExecContext(ctx, `ALTER TABLE job_snapshot_progress ADD COLUMN cursor_json LONGTEXT NULL AFTER next_offset`); err != nil && !isDuplicateColumnError(err) {
 		return err
 	}
+	if _, err := s.sqlRunner().ExecContext(ctx, snapshotScopeDDL); err != nil {
+		return err
+	}
 	if _, err := s.sqlRunner().ExecContext(ctx, `CREATE TABLE IF NOT EXISTS iceberg_commit_intents (
 		operation_id CHAR(36) NOT NULL PRIMARY KEY,
 		job_id VARCHAR(255) NOT NULL,

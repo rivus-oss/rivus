@@ -47,6 +47,12 @@ func Register(reg *connector.Registry) {
 }
 
 func rebuildSnapshotConfig(jctx connector.JobContext, cfg config.IcebergConfig) (config.IcebergConfig, error) {
+	if cfg.SnapshotWriteMode == config.IcebergSnapshotAutoCutoffWriteMode {
+		if !cfg.SnapshotCutoffResolved || len(cfg.SnapshotReplaceFilters) == 0 || cfg.SnapshotReplaceDeleteExecutor != "trino" {
+			return cfg, fmt.Errorf("%s requires source-resolved durable snapshot cutoffs", config.IcebergSnapshotAutoCutoffWriteMode)
+		}
+		cfg.SnapshotWriteMode = snapshotWriteModeAuto
+	}
 	scoped := cfg.SnapshotWriteMode == config.IcebergRebuildScopedWriteMode || cfg.SnapshotWriteMode == config.IcebergRebuildScopedNativeWriteMode
 	scopedBound := jctx.SubmissionID != "" && jctx.Metadata[config.IcebergRebuildScopedKey] == jctx.SubmissionID
 	if scoped != scopedBound || (scoped && jctx.Metadata[config.IcebergRebuildFullResetKey] != "") {
@@ -111,6 +117,7 @@ func decodeIcebergConfig(v any) (config.IcebergConfig, error) {
 }
 
 func normalizeIcebergConfig(c config.IcebergConfig) config.IcebergConfig {
+	c.AutoMigration = normalizeAutoMigrationConfig(c.AutoMigration)
 	c.CatalogURI = strings.TrimRight(strings.TrimSpace(c.CatalogURI), "/")
 	c.Warehouse = strings.TrimRight(strings.TrimSpace(c.Warehouse), "/")
 	c.Credential = strings.TrimSpace(c.Credential)

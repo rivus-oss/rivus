@@ -70,6 +70,9 @@ type MySQLTableConfig struct {
 	// Filter is appended to the initial snapshot query as a raw WHERE condition.
 	// It is ignored during CDC/binlog streaming.
 	Filter string `yaml:"filter" json:"filter"`
+	// SnapshotCutoff detects a monthly snapshot boundary and supplies both the
+	// MySQL predicate and the matching Iceberg replacement predicate.
+	SnapshotCutoff *MySQLSnapshotCutoffConfig `yaml:"snapshot_cutoff,omitempty" json:"snapshot_cutoff,omitempty"`
 	// SnapshotKeyColumns overrides initial snapshot keyset pagination/order columns.
 	// Use a unique tie-breaker as the last column, for example ["created_at", "id"].
 	// It is ignored during CDC/binlog streaming.
@@ -77,6 +80,14 @@ type MySQLTableConfig struct {
 	// SnapshotExtraColumns appends computed columns to the initial snapshot SELECT.
 	// It is ignored during CDC/binlog streaming.
 	SnapshotExtraColumns []MySQLSnapshotExtraColumnConfig `yaml:"snapshot_extra_columns" json:"snapshot_extra_columns"`
+}
+
+type MySQLSnapshotCutoffConfig struct {
+	Column              string  `yaml:"column" json:"column"`
+	MinMonthRows        int64   `yaml:"min_month_rows" json:"min_month_rows"`
+	MinGrowthRatio      float64 `yaml:"min_growth_ratio" json:"min_growth_ratio"`
+	LookbackMonths      int     `yaml:"lookback_months" json:"lookback_months"`
+	QueryTimeoutSeconds int     `yaml:"query_timeout_seconds" json:"query_timeout_seconds"`
 }
 
 type MySQLSnapshotExtraColumnConfig struct {
@@ -250,6 +261,19 @@ type IcebergConfig struct {
 	AllowDropColumn               bool                                          `yaml:"allow_drop_column" json:"allow_drop_column"`
 	AllowRenameColumn             bool                                          `yaml:"allow_rename_column" json:"allow_rename_column"`
 	AllowUnsafeTypeChanges        bool                                          `yaml:"allow_unsafe_type_changes" json:"allow_unsafe_type_changes"`
+	AutoMigration                 IcebergAutoMigrationConfig                    `yaml:"auto_migration" json:"auto_migration"`
+
+	// Runtime-only proof supplied by the source scope resolver, never accepted from YAML/JSON.
+	SnapshotCutoffResolved bool `yaml:"-" json:"-"`
+}
+
+// IcebergAutoMigrationConfig authorizes bounded data rewrites for explicitly
+// selected source tables. Normal Iceberg schema promotions do not need this.
+type IcebergAutoMigrationConfig struct {
+	Enabled        bool     `yaml:"enabled" json:"enabled"`
+	Tables         []string `yaml:"tables" json:"tables"`
+	MaxTableBytes  ByteSize `yaml:"max_table_bytes" json:"max_table_bytes"`
+	TimeoutSeconds int      `yaml:"timeout_seconds" json:"timeout_seconds"`
 }
 
 type IcebergTrinoDeleteConfig struct {
@@ -490,6 +514,10 @@ func NormalizeMySQLConfig(cfg MySQLConfig) MySQLConfig {
 				continue
 			}
 			v.Filter = normalizeSnapshotFilter(v.Filter)
+			if v.SnapshotCutoff != nil {
+				cutoff := NormalizeMySQLSnapshotCutoff(*v.SnapshotCutoff)
+				v.SnapshotCutoff = &cutoff
+			}
 			v.SnapshotKeyColumns = normalizeTrimmedStringSlice(v.SnapshotKeyColumns)
 			v.SnapshotExtraColumns = normalizeMySQLSnapshotExtraColumns(v.SnapshotExtraColumns)
 			norm[kk] = v

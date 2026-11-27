@@ -115,7 +115,7 @@ func TestWorkerFenceRejectsLostOwnershipAndRollsBackExpiredWrite(t *testing.T) {
 }
 
 func TestWorkerFenceProtectsRecoveryAndSnapshotWrites(t *testing.T) {
-	for _, operation := range []string{"begin", "mark", "delete", "progress", "done", "start", "clear"} {
+	for _, operation := range []string{"begin", "mark", "delete", "progress", "done", "start", "clear", "scope"} {
 		t.Run(operation, func(t *testing.T) {
 			state := &fenceSQLState{owned: false}
 			s := fenceTestStore(t, state)
@@ -136,6 +136,8 @@ func TestWorkerFenceProtectsRecoveryAndSnapshotWrites(t *testing.T) {
 				err = s.SaveSnapshotStart(ctx, "state", Offset{})
 			case "clear":
 				err = s.ClearSnapshotProgress(ctx, "state")
+			case "scope":
+				err = s.SaveSnapshotScopePlan(ctx, "state", "submission", `{}`)
 			}
 			if !errors.Is(err, ErrWorkerOwnershipLost) || state.writes != 0 {
 				t.Fatalf("stale %s result=%v writes=%d", operation, err, state.writes)

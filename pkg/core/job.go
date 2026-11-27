@@ -1707,6 +1707,14 @@ func (j *Job) startWithMode(mode config.JobMode) (err error) {
 	if err != nil {
 		return j.failStart("source", err, cancel)
 	}
+	if resolver, ok := src.(connector.SnapshotScopeResolver); ok {
+		sinkCfg, err = resolver.ResolveSnapshotScope(ctx, jctx)
+		if err != nil {
+			closeConnector(src)
+			return j.failStart("snapshot cutoff", err, cancel)
+		}
+		jctx.SinkConfig = sinkCfg
+	}
 
 	sink, err := j.registry.NewSink(sinkType, jctx, sinkCfg)
 	if err != nil {

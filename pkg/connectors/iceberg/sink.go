@@ -128,6 +128,7 @@ type commitProgress struct {
 	sourceKey       string
 	targetNamespace string
 	targetTable     string
+	targetUUID      string
 	rowCount        int
 	deleteCount     int
 }
@@ -253,6 +254,10 @@ func newSinkWithRebuild(jobID, stateKey, jobName string, cfg config.IcebergConfi
 }
 
 func newSinkWithRebuildMode(jobID, stateKey, jobName string, cfg config.IcebergConfig, retry config.RetryPolicy, offsetSto meta.OffsetStore, progress connector.ProgressReporter, scopedToken string, native bool) (*Sink, error) {
+	cfg.AutoMigration = normalizeAutoMigrationConfig(cfg.AutoMigration)
+	if err := validateAutoMigrationConfig(cfg.AutoMigration); err != nil {
+		return nil, err
+	}
 	cfg.SnapshotWriteMode = normalizeSnapshotWriteMode(cfg.SnapshotWriteMode)
 	if !isValidSnapshotWriteMode(cfg.SnapshotWriteMode) {
 		return nil, fmt.Errorf("invalid iceberg snapshot_write_mode %q (valid: %s, %s, %s, %s, %s, %s)",
@@ -3382,31 +3387,18 @@ func (s *Sink) applyDDL(ctx context.Context, state *tableState, ev model.Event) 
 		}
 
 		txn := state.table.NewTransaction()
-		updater := txn.UpdateSchema(false, s.cfg.AllowUnsafeTypeChanges)
-		for _, action := range plan {
-			if err := applyDDLAction(updater, action, s.cfg); err != nil {
-				return util.Permanent(err)
-			}
-		}
-		if err := updater.Commit(); err != nil {
+		replacements, err := stageIcebergDDL(txn, plan, s.cfg, state.sourceKey)
+		if err != nil {
 			return util.Permanent(err)
 		}
-		commitErr := s.withCommitSlot(ctx, commitProgress{
+		updated, err = s.commitSchemaTransaction(ctx, txn, state.table, replacements, commitProgress{
 			operation:       "schema",
 			icebergCommit:   true,
-			recoveredTable:  &updated,
 			sourceKey:       state.sourceKey,
 			targetNamespace: state.targetNamespace,
 			targetTable:     state.targetTable,
-		}, func(ctx context.Context) error {
-			var err error
-			if err = txn.SetProperties(icebergCommitProperties(ctx, nil)); err != nil {
-				return err
-			}
-			updated, err = txn.Commit(ctx)
-			return classifyCatalogCommitError(updated, err)
 		})
-		return commitErr
+		return err
 	})
 	if err != nil {
 		return s.stateOperationError("apply DDL", state, err)
@@ -3631,34 +3623,46 @@ func (s *Sink) loadOrCreateTable(ctx context.Context, namespace, tableName strin
 
 func (s *Sink) syncTableSchema(ctx context.Context, tbl *icetable.Table, targetNamespace, targetTable string, sourceSchema *model.TableSchema, pkCols []string) (*icetable.Table, error) {
 	txn := tbl.NewTransaction()
-	updater := txn.UpdateSchema(false, s.cfg.AllowUnsafeTypeChanges)
-
-	changed, err := syncSchema(updater, tbl.Schema(), sourceSchema, pkCols, s.cfg)
+	var migrations []ddlAction
+	for _, column := range sourceSchema.Columns {
+		desired, err := icebergTypeForColumn(column)
+		if err != nil {
+			return nil, util.Permanent(err)
+		}
+		if field, ok := tbl.Schema().FindFieldByNameCaseInsensitive(column.Name); ok && schemaRewriteRequired(field.Type, desired) {
+			if !s.cfg.AutoMigration.Enabled && schemaWriterCanKeepType(field.Type, desired) {
+				continue
+			}
+			migrations = append(migrations, ddlAction{Kind: ddlActionUpdateColumn, Column: column})
+		}
+	}
+	replacements, err := stageIcebergDDL(txn, migrations, s.cfg, tableKey(sourceSchema.SchemaName, sourceSchema.TableName))
 	if err != nil {
 		return nil, util.Permanent(err)
 	}
-	if !changed {
+	staged, err := txn.StagedTable()
+	if err != nil {
+		return nil, err
+	}
+	updater := txn.UpdateSchema(false, s.cfg.AllowUnsafeTypeChanges)
+
+	changed, err := syncSchema(updater, staged.Schema(), sourceSchema, pkCols, s.cfg)
+	if err != nil {
+		return nil, util.Permanent(err)
+	}
+	if !changed && len(replacements) == 0 {
 		return tbl, nil
 	}
 
 	if err := updater.Commit(); err != nil {
 		return nil, err
 	}
-	var updated *icetable.Table
-	err = s.withCommitSlot(ctx, commitProgress{
+	updated, err := s.commitSchemaTransaction(ctx, txn, tbl, replacements, commitProgress{
 		operation:       "schema",
 		icebergCommit:   true,
-		recoveredTable:  &updated,
 		sourceKey:       tableKey(sourceSchema.SchemaName, sourceSchema.TableName),
 		targetNamespace: targetNamespace,
 		targetTable:     targetTable,
-	}, func(ctx context.Context) error {
-		var commitErr error
-		if commitErr = txn.SetProperties(icebergCommitProperties(ctx, nil)); commitErr != nil {
-			return commitErr
-		}
-		updated, commitErr = txn.Commit(ctx)
-		return classifyCatalogCommitError(updated, commitErr)
 	})
 	if err != nil {
 		return nil, s.operationError("sync table schema", err)
