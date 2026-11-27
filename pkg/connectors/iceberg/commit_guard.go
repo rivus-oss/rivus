@@ -146,7 +146,12 @@ func (s *Sink) guardedIcebergCommit(ctx context.Context, progress commitProgress
 	}
 	var preparation *icebergPreparationError
 	if errors.As(err, &preparation) {
-		if deleteErr := store.DeleteIcebergCommit(finishCtx, intent.StateKey, operationID); deleteErr != nil {
+		// Preparation has positively failed before any catalog request. Allow
+		// bounded cleanup after its deadline, still through the ownership-fenced
+		// store. Success and uncertain catalog outcomes stay bound to ctx above.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cleanupCancel()
+		if deleteErr := store.DeleteIcebergCommit(cleanupCtx, intent.StateKey, operationID); deleteErr != nil {
 			return util.Permanent(fmt.Errorf("Iceberg preparation failed before catalog call; intent cleanup failed operation=%s: %w; preparation error: %w", operationID, deleteErr, err))
 		}
 		return err

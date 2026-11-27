@@ -1506,7 +1506,11 @@ func (j *Job) preflight(ctx context.Context, src connector.Source, sink connecto
 				targetDB, targetTbl = resolver.ResolveTarget(t.Schema, t.Table)
 			}
 
-			ensureCtx, ensureCancel := context.WithTimeout(ctx, 45*time.Second)
+			ensureTimeout := 45 * time.Second
+			if provider, ok := sink.(connector.TablePreparationTimeoutProvider); ok {
+				ensureTimeout = max(ensureTimeout, provider.TablePreparationTimeout())
+			}
+			ensureCtx, ensureCancel := context.WithTimeout(ctx, ensureTimeout)
 			err := tm.EnsureTable(ensureCtx, targetDB, targetTbl, schema)
 			ensureCancel()
 			if err != nil {
