@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,6 +16,7 @@ import (
 	iceberglib "github.com/apache/iceberg-go"
 
 	"github.com/gerinsp/rivus/pkg/config"
+	"github.com/gerinsp/rivus/pkg/connector"
 )
 
 const (
@@ -42,12 +44,30 @@ func normalizeAutoMigrationConfig(cfg config.IcebergAutoMigrationConfig) config.
 	return cfg
 }
 
+func resolveAutoMigrationTables(cfg config.IcebergAutoMigrationConfig, sourceTables []connector.TableRef) (config.IcebergAutoMigrationConfig, error) {
+	cfg = normalizeAutoMigrationConfig(cfg)
+	if !cfg.Enabled {
+		return cfg, nil
+	}
+	if len(cfg.Tables) == 0 {
+		for _, table := range sourceTables {
+			if strings.TrimSpace(table.Schema) == "" || strings.TrimSpace(table.Table) == "" {
+				return cfg, fmt.Errorf("auto_migration cannot infer a table without a source schema and table name")
+			}
+			cfg.Tables = append(cfg.Tables, strings.TrimSpace(table.Schema)+"."+strings.TrimSpace(table.Table))
+		}
+		cfg = normalizeAutoMigrationConfig(cfg)
+		sort.Strings(cfg.Tables)
+	}
+	return cfg, validateAutoMigrationConfig(cfg)
+}
+
 func validateAutoMigrationConfig(cfg config.IcebergAutoMigrationConfig) error {
 	if !cfg.Enabled {
 		return nil
 	}
 	if len(cfg.Tables) == 0 {
-		return fmt.Errorf("auto_migration.enabled requires explicit source tables in auto_migration.tables")
+		return fmt.Errorf("auto_migration.enabled requires resolved source tables or explicit source tables in auto_migration.tables")
 	}
 	for _, table := range cfg.Tables {
 		parts := strings.Split(table, ".")
@@ -63,7 +83,7 @@ func validateAutoMigrationConfig(cfg config.IcebergAutoMigrationConfig) error {
 
 func schemaMigrationAllowed(cfg config.IcebergAutoMigrationConfig, sourceKey, column string, current, desired iceberglib.Type) error {
 	if !cfg.Enabled {
-		return fmt.Errorf("column %q: Iceberg cannot promote %s to %s; automatic migration is disabled; enable auto_migration and list source %q to authorize a validated table rewrite", column, current, desired, sourceKey)
+		return fmt.Errorf("column %q: Iceberg cannot promote %s to %s; automatic migration is disabled; enable auto_migration for selected source %q to authorize a validated table rewrite", column, current, desired, sourceKey)
 	}
 	if err := validateAutoMigrationConfig(cfg); err != nil {
 		return err

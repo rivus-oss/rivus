@@ -65,6 +65,8 @@ func CleanupOrphanFilesForJobConfig(ctx context.Context, jobID string, jobCfg *c
 	if iceCfg.SnapshotWriteMode == config.IcebergSnapshotAutoCutoffWriteMode {
 		iceCfg.SnapshotWriteMode = snapshotWriteModeAuto
 	}
+	// Orphan cleanup does not evolve schemas and has no source discovery phase.
+	iceCfg.AutoMigration.Enabled = false
 	sink, err := NewSink(jobID, "", strings.TrimSpace(jobCfg.Name), iceCfg, jobCfg.Retry, nil, nil)
 	if err != nil {
 		return nil, err

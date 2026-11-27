@@ -2,6 +2,9 @@ package iceberg
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +13,7 @@ import (
 	iceberglib "github.com/apache/iceberg-go"
 	icetable "github.com/apache/iceberg-go/table"
 	"github.com/gerinsp/rivus/pkg/config"
+	"github.com/gerinsp/rivus/pkg/connector"
 	"github.com/gerinsp/rivus/pkg/model"
 )
 
@@ -158,5 +162,81 @@ func TestAutoMigrationConfigurationValidation(t *testing.T) {
 				t.Fatalf("validation error = %v", err)
 			}
 		})
+	}
+}
+
+func TestAutoMigrationResolvesSourceTablesWhenOverrideOmitted(t *testing.T) {
+	refs := []connector.TableRef{{Schema: "app_b", Table: "orders"}, {Schema: " App_A ", Table: " Orders "}, {Schema: "APP_A", Table: "ORDERS"}}
+	for _, tc := range []struct {
+		name      string
+		cfg       config.IcebergAutoMigrationConfig
+		refs      []connector.TableRef
+		want      []string
+		wantError bool
+	}{
+		{"source selection", config.IcebergAutoMigrationConfig{Enabled: true}, refs, []string{"app_a.orders", "app_b.orders"}, false},
+		{"explicit smaller scope", config.IcebergAutoMigrationConfig{Enabled: true, Tables: []string{"app_b.orders"}}, refs, []string{"app_b.orders"}, false},
+		{"disabled without source", config.IcebergAutoMigrationConfig{}, nil, []string{}, false},
+		{"no selection", config.IcebergAutoMigrationConfig{Enabled: true}, nil, nil, true},
+		{"unexpanded wildcard", config.IcebergAutoMigrationConfig{Enabled: true}, []connector.TableRef{{Schema: "app_*", Table: "orders"}}, nil, true},
+		{"missing schema", config.IcebergAutoMigrationConfig{Enabled: true}, []connector.TableRef{{Table: "orders"}}, nil, true},
+		{"missing table", config.IcebergAutoMigrationConfig{Enabled: true}, []connector.TableRef{{Schema: "app"}}, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolved, err := resolveAutoMigrationTables(tc.cfg, tc.refs)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("err=%v cfg=%+v", err, resolved)
+			}
+			if err == nil && !reflect.DeepEqual(resolved.Tables, tc.want) {
+				t.Fatalf("resolved=%v want=%v", resolved.Tables, tc.want)
+			}
+		})
+	}
+}
+
+func TestAutoMigrationFactoryInheritsExpandedSourceSelection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/config" {
+			t.Errorf("unexpected catalog request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"defaults": map[string]string{}, "overrides": map[string]string{}})
+	}))
+	defer server.Close()
+	reg := connector.NewRegistry()
+	Register(reg)
+	rolling := false
+	cfg := config.IcebergConfig{RestURI: server.URL, Warehouse: "fixture", SnapshotWriteMode: "append", SnapshotRollingEnabled: &rolling, AutoMigration: config.IcebergAutoMigrationConfig{Enabled: true}}
+	jctx := connector.JobContext{JobID: "migration-source-scope", SourceType: "mysql", SourceTables: []connector.TableRef{{Schema: "asmat_trikusuma", Table: "tbl_md_promo"}, {Schema: "asmat_wbshuttle", Table: "tbl_md_promo"}}, Retry: config.RetryPolicy{MaxAttempts: 1}}
+	created, err := reg.NewSink("iceberg_native", jctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := created.(*Sink).cfg.AutoMigration
+	if !reflect.DeepEqual(policy.Tables, []string{"asmat_trikusuma.tbl_md_promo", "asmat_wbshuttle.tbl_md_promo"}) || policy.MaxTableBytes != defaultMigrationMaxBytes || policy.TimeoutSeconds != defaultMigrationTimeout {
+		t.Fatalf("factory did not bind source tables and limits: %+v", policy)
+	}
+	if cfg.AutoMigration.Tables != nil {
+		t.Fatal("factory mutated the stored migration configuration")
+	}
+	if _, err := reg.NewSink("iceberg_native", connector.JobContext{}, cfg); err == nil || !strings.Contains(err.Error(), "resolved source tables") {
+		t.Fatalf("missing source selection was accepted: %v", err)
+	}
+}
+
+func TestAutoMigrationRewritesUsingInferredSourceScope(t *testing.T) {
+	sink, state := integerStringTestSink(t, iceberglib.PrimitiveTypes.Int32, []map[string]interface{}{{"id": int64(1), "LayoutPromo": int32(18)}})
+	policy, err := resolveAutoMigrationTables(config.IcebergAutoMigrationConfig{Enabled: true}, []connector.TableRef{{Schema: "app", Table: "promos"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.cfg.AutoMigration = policy
+	if err := sink.applyDDL(context.Background(), state, model.Event{Type: model.EventTypeDDL, DDL: layoutStringDDL}); err != nil {
+		t.Fatal(err)
+	}
+	if got := integerStringTestRows(t, state.table)[1]["LayoutPromo"]; got != "18" {
+		t.Fatalf("inferred migration did not preserve data: %v", got)
 	}
 }

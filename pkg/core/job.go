@@ -1707,6 +1707,9 @@ func (j *Job) startWithMode(mode config.JobMode) (err error) {
 	if err != nil {
 		return j.failStart("source", err, cancel)
 	}
+	if lister, ok := src.(connector.TableLister); ok {
+		jctx.SourceTables = append([]connector.TableRef(nil), lister.Tables()...)
+	}
 	if resolver, ok := src.(connector.SnapshotScopeResolver); ok {
 		sinkCfg, err = resolver.ResolveSnapshotScope(ctx, jctx)
 		if err != nil {

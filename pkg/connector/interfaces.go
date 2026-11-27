@@ -21,6 +21,8 @@ type JobContext struct {
 	SourceType   string
 	SourceConfig any
 	JobConfig    *config.JobConfig
+	// Concrete source selection after discovery and pattern expansion.
+	SourceTables []TableRef
 
 	Retry     config.RetryPolicy
 	MetaStore meta.OffsetStore
