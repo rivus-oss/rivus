@@ -240,3 +240,60 @@ func TestAutoMigrationRewritesUsingInferredSourceScope(t *testing.T) {
 		t.Fatalf("inferred migration did not preserve data: %v", got)
 	}
 }
+
+func TestAutoMigrationStartupKeepsCompatibleExistingTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		idType          string
+		valueType       string
+		valueColumnType string
+	}{
+		{"wider identifier and data columns", "int", "int", "int(11)"},
+		{"legacy tinyint identifier and data columns", "tinyint", "tinyint", "tinyint(1)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sink, state := integerStringTestSink(t, iceberglib.PrimitiveTypes.Int64, []map[string]interface{}{{"id": int64(3), "LayoutPromo": int64(18)}})
+			source := *state.sourceSchema
+			source.Columns = append([]model.TableColumn(nil), source.Columns...)
+			source.Columns[0].DataType = tc.idType
+			source.Columns[0].ColumnType = "int(11)"
+			if tc.idType == "tinyint" {
+				source.Columns[0].ColumnType = "tinyint(1)"
+			}
+			source.Columns[1].DataType = tc.valueType
+			source.Columns[1].ColumnType = tc.valueColumnType
+			beforeSnapshot := state.table.CurrentSnapshot().SnapshotID
+			beforeSchema := state.table.Schema()
+			// An unnecessary rewrite would exceed this cap. Startup must keep
+			// the existing IDs and values without opening or rewriting data files.
+			sink.cfg.AutoMigration.MaxTableBytes = 1
+			loaded, err := sink.syncTableSchema(context.Background(), state.table, "bronze", "promos", &source, []string{"id"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !loaded.Schema().Equals(beforeSchema) || loaded.CurrentSnapshot().SnapshotID != beforeSnapshot {
+				t.Fatal("startup replaced a compatible field or rewrote the table")
+			}
+			if got := integerStringTestRows(t, loaded)[3]["LayoutPromo"]; got != int64(18) {
+				t.Fatalf("startup changed a legacy numeric value: %v", got)
+			}
+		})
+	}
+}
+
+func TestAutoMigrationStartupHonorsPreparationTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		cfg  config.IcebergAutoMigrationConfig
+		want time.Duration
+	}{
+		{config.IcebergAutoMigrationConfig{}, 45 * time.Second},
+		{config.IcebergAutoMigrationConfig{Enabled: true}, 900 * time.Second},
+		{config.IcebergAutoMigrationConfig{Enabled: true, TimeoutSeconds: 120}, 120 * time.Second},
+		{config.IcebergAutoMigrationConfig{Enabled: true, TimeoutSeconds: 10}, 45 * time.Second},
+	} {
+		sink := &Sink{cfg: config.IcebergConfig{AutoMigration: tc.cfg}}
+		if got := sink.TablePreparationTimeout(); got != tc.want {
+			t.Fatalf("timeout=%s want=%s", got, tc.want)
+		}
+	}
+}

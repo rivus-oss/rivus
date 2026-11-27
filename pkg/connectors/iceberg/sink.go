@@ -3630,7 +3630,7 @@ func (s *Sink) syncTableSchema(ctx context.Context, tbl *icetable.Table, targetN
 			return nil, util.Permanent(err)
 		}
 		if field, ok := tbl.Schema().FindFieldByNameCaseInsensitive(column.Name); ok && schemaRewriteRequired(field.Type, desired) {
-			if !s.cfg.AutoMigration.Enabled && schemaWriterCanKeepType(field.Type, desired) {
+			if schemaWriterCanKeepType(field.Type, desired) {
 				continue
 			}
 			migrations = append(migrations, ddlAction{Kind: ddlActionUpdateColumn, Column: column})

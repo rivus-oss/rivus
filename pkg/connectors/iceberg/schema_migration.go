@@ -24,6 +24,14 @@ const (
 	defaultMigrationTimeout  = 15 * 60
 )
 
+func (s *Sink) TablePreparationTimeout() time.Duration {
+	if !s.cfg.AutoMigration.Enabled {
+		return 45 * time.Second
+	}
+	policy := normalizeAutoMigrationConfig(s.cfg.AutoMigration)
+	return max(45*time.Second, time.Duration(policy.TimeoutSeconds)*time.Second)
+}
+
 func normalizeAutoMigrationConfig(cfg config.IcebergAutoMigrationConfig) config.IcebergAutoMigrationConfig {
 	if cfg.MaxTableBytes == 0 {
 		cfg.MaxTableBytes = defaultMigrationMaxBytes
@@ -125,8 +133,9 @@ func schemaRewriteRequired(current, desired iceberglib.Type) bool {
 	}
 }
 
-// Preserve the existing wider writer and legacy MySQL boolean mapping unless
-// the operator opts into aligning types through a data migration.
+// Startup reconciliation keeps compatible wider writers and legacy MySQL
+// boolean mappings. Enabling migration must not force a table rewrite merely
+// to narrow an existing type; an explicit DDL event can request that conversion.
 func schemaWriterCanKeepType(current, desired iceberglib.Type) bool {
 	if icebergTypeCanRepresent(current, desired) {
 		return true

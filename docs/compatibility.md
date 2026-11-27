@@ -85,6 +85,10 @@ Incompatible source type changes, such as `LayoutPromo INT` becoming `VARCHAR(25
 
 For supported conversions, Rivus replaces the field with a new internal ID, preserves its visible name and position, and rewrites current logical rows in one catalog transaction. This applies to DDL events and startup schema reconciliation. Supported conversion families include text with numeric, boolean, date/timestamp or binary values, numeric/boolean conversions, and date/timestamp conversions; parsing failures, overflow, precision loss and unsupported casts stop the migration. The scan applies existing deletes, preserves NULLs and converts bounded Arrow batches. Original schemas and files remain referenced by historical snapshots. Concurrent table changes reject a stale transaction.
 
+Startup reconciliation preserves compatible wider Iceberg types and legacy numeric/boolean mappings, including identifier fields, instead of rewriting them just because migration is enabled. Explicit DDL conversions still use the migration checks. Schema preparation allows the configured migration timeout rather than imposing the ordinary 45-second metadata preflight limit; cancellation of the parent job still takes precedence.
+
+When preparation fails before any catalog request, bounded ownership-fenced cleanup can remove its unsent intent even if the preparation context expired. Successful requests and uncertain catalog outcomes retain the existing cancellation and recovery protections. This does not automatically resolve retained intents from earlier failures.
+
 Automatic rewriting rejects identifier fields and current partition or sort sources; these require a planned target rebuild. It rewrites the whole affected table, even if source snapshot filters are configured. It does not recover purged MySQL binlogs or advance the source checkpoint. Follow [checkpoint recovery](iceberg-checkpoint-recovery.md#operator-recovery) separately when source history is missing.
 
 ## Doris expectations

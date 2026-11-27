@@ -185,6 +185,43 @@ func TestIcebergPreparationCleanupFailureRetainsReceiptAndBothCauses(t *testing.
 	}
 }
 
+type contextCheckedCleanupStore struct{ *guardTestStore }
+
+func (s *contextCheckedCleanupStore) DeleteIcebergCommit(ctx context.Context, key, operation string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.guardTestStore.DeleteIcebergCommit(ctx, key, operation)
+}
+
+func TestIcebergCancelledPreparationCleansOnlyKnownUnsentIntent(t *testing.T) {
+	for _, preparation := range []bool{true, false} {
+		t.Run(map[bool]string{true: "preparation", false: "uncertain catalog outcome"}[preparation], func(t *testing.T) {
+			store := &contextCheckedCleanupStore{newGuardTestStore()}
+			sink := &Sink{jobID: "job", stateKey: "state", offsetSto: store}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			err := sink.withCommitSlot(ctx, commitProgress{operation: "schema-rewrite", icebergCommit: true}, func(context.Context) error {
+				cancel()
+				if preparation {
+					return icebergPreparationFailed(context.Canceled)
+				}
+				return context.Canceled
+			})
+			if err == nil || store.saveCount != 0 {
+				t.Fatalf("err=%v checkpoint saves=%d", err, store.saveCount)
+			}
+			if preparation {
+				if len(store.intents) != 0 || strings.Contains(err.Error(), "outcome UNKNOWN") {
+					t.Fatalf("known unsent preparation remained blocked: %v", err)
+				}
+			} else if len(store.intents) != 1 || !strings.Contains(err.Error(), "outcome UNKNOWN") {
+				t.Fatalf("uncertain outcome lost its receipt: %v", err)
+			}
+		})
+	}
+}
+
 func (s *guardTestStore) ListIcebergCommits(_ context.Context, _ string) ([]meta.IcebergCommitIntent, error) {
 	intents := make([]meta.IcebergCommitIntent, 0, len(s.intents))
 	for _, intent := range s.intents {

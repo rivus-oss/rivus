@@ -170,6 +170,12 @@ type TableManager interface {
 	EnsureTable(ctx context.Context, targetSchema, targetTable string, schema *model.TableSchema) error
 }
 
+// A data rewrite during schema preparation may need more than the default
+// metadata-only preflight timeout.
+type TablePreparationTimeoutProvider interface {
+	TablePreparationTimeout() time.Duration
+}
+
 type TargetResolver interface {
 	ResolveTarget(srcSchema, srcTable string) (targetSchema, targetTable string)
 }
