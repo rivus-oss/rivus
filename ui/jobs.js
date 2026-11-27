@@ -31,6 +31,7 @@ let showJobDetails = () => {};
 let showLogsForJob = () => {};
 let showErrors = () => {};
 let initialized = false;
+let openJobMenu = null;
 
 export function initJobs(handlers = {}) {
   refreshDashboard = handlers.refreshDashboard || refreshDashboard;
@@ -41,6 +42,16 @@ export function initJobs(handlers = {}) {
   if (initialized) return;
   initialized = true;
   document.addEventListener('click', handleJobClick);
+  document.addEventListener('keydown', handleJobMenuKeydown);
+  document.addEventListener('scroll', (event) => {
+    if (!openJobMenu || openJobMenu.element.contains(event.target)) return;
+    const rect = openJobMenu.trigger.getBoundingClientRect();
+    const anchor = openJobMenu.anchorRect;
+    // A click may scroll the trigger into view before opening the menu, while
+    // its scroll event arrives afterwards. Only dismiss if the anchor moved.
+    if (anchor && (Math.abs(rect.top - anchor.top) > 1 || Math.abs(rect.left - anchor.left) > 1)) closeJobMenu();
+  }, true);
+  window.addEventListener('resize', () => closeJobMenu());
 }
 
 export function isBulkBusy() {
@@ -56,27 +67,136 @@ function actionButtons(job) {
   const canResubmit = job.status === 'FAILED' || job.status === 'STOPPED' || job.status === 'PAUSED';
   const idAttr = escapeHtml(job.id ?? '');
 
-  const btnBase = 'whitespace-nowrap rounded-md border px-3 py-2 text-xs font-semibold transition';
-  const btnCancel = `${btnBase} border-amber-200 text-amber-800 hover:bg-amber-50`;
-  const btnPause = `${btnBase} border-violet-200 text-violet-800 hover:bg-violet-50`;
-  const btnDelete = `${btnBase} border-rose-200 text-rose-700 hover:bg-rose-50`;
-  const btnError = `${btnBase} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`;
-  const btnDetail = `${btnBase} border-blue-300 text-blue-800 hover:bg-blue-50`;
-  const btnLogs = `${btnBase} border-slate-300 text-slate-700 hover:bg-slate-50`;
-  const btnResubmit = `${btnBase} border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100`;
+  const item = (action, label, tone = '') => `<button type="button" role="menuitem" tabindex="-1" class="job-menu-item ${tone}" data-job-action="${action}" data-job-id="${idAttr}"${action === 'rename' ? ` data-job-name="${escapeHtml(job.name || '')}"` : ''}>${label}</button>`;
 
   return `
-    <div class="flex min-w-max flex-nowrap items-center justify-end gap-2">
-      <button type="button" class="${btnDetail}" data-job-action="details" data-job-id="${idAttr}">Details</button>
-      <button type="button" class="${btnDetail}" data-job-action="rename" data-job-name="${escapeHtml(job.name || '')}" data-job-id="${idAttr}">Rename</button>
-      <button type="button" class="${btnLogs}" data-job-action="logs" data-job-id="${idAttr}">Logs</button>
-      ${canPause ? `<button type="button" class="${btnPause}" data-job-action="pause" data-job-id="${idAttr}">Pause</button>` : ''}
-      ${canCancel ? `<button type="button" class="${btnCancel}" data-job-action="cancel" data-job-id="${idAttr}">Cancel</button>` : ''}
-      ${canResubmit ? `<button type="button" class="${btnResubmit}" data-job-action="resubmit" data-job-id="${idAttr}">Resubmit</button>` : ''}
-      <button type="button" class="${btnDelete}" data-job-action="delete" data-job-id="${idAttr}">Delete</button>
-      ${showErr ? `<button type="button" class="${btnError}" data-job-action="errors" data-job-id="${idAttr}">Errors${errorCount > 0 ? ` (${errorCount})` : ''}</button>` : ''}
+    <div class="job-actions">
+      <button type="button" class="whitespace-nowrap rounded-md border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-800 transition hover:bg-blue-50" data-job-action="details" data-job-id="${idAttr}">Details</button>
+      <button type="button" class="job-menu-trigger" data-job-menu-trigger data-job-id="${idAttr}" aria-label="More actions for ${idAttr}" aria-haspopup="menu" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+      </button>
+      <template data-job-menu-content>
+        ${item('logs', 'Logs')}
+        ${item('rename', 'Rename')}
+        ${showErr ? item('errors', `Errors${errorCount > 0 ? ` (${errorCount})` : ''}`) : ''}
+        <div class="job-menu-divider" role="separator"></div>
+        ${canPause ? item('pause', 'Pause') : ''}
+        ${canCancel ? item('cancel', 'Cancel', 'job-menu-warning') : ''}
+        ${canResubmit ? item('resubmit', 'Resubmit') : ''}
+        ${item('delete', 'Delete', 'job-menu-danger')}
+      </template>
     </div>
   `;
+}
+
+function closeJobMenu(returnFocus = false) {
+  if (!openJobMenu) return;
+  const { trigger, element } = openJobMenu;
+  openJobMenu = null;
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.removeAttribute('aria-controls');
+  element.remove();
+  if (returnFocus && trigger.isConnected) trigger.focus({ preventScroll: true });
+}
+
+function positionJobMenu() {
+  if (!openJobMenu) return;
+  const { trigger, element } = openJobMenu;
+  if (!trigger.isConnected || !trigger.getClientRects().length) {
+    closeJobMenu();
+    return;
+  }
+  const rect = trigger.getBoundingClientRect();
+  openJobMenu.anchorRect = { top: rect.top, left: rect.left };
+  const menu = element.getBoundingClientRect();
+  const gap = 8;
+  const left = Math.max(gap, Math.min(rect.right - menu.width, window.innerWidth - menu.width - gap));
+  const top = rect.bottom + gap + menu.height <= window.innerHeight - gap
+    ? rect.bottom + gap
+    : Math.max(gap, rect.top - menu.height - gap);
+  element.style.left = `${left}px`;
+  element.style.top = `${top}px`;
+}
+
+function showJobMenu(trigger, focusLast = false) {
+  if (openJobMenu?.trigger === trigger) {
+    closeJobMenu(true);
+    return;
+  }
+  closeJobMenu();
+  const template = trigger.parentElement.querySelector('[data-job-menu-content]');
+  if (!template) return;
+  const element = document.createElement('div');
+  element.id = 'jobActionsMenu';
+  element.className = 'job-action-menu';
+  element.setAttribute('role', 'menu');
+  element.setAttribute('aria-label', 'Job actions');
+  element.innerHTML = template.innerHTML;
+  document.body.appendChild(element);
+  trigger.setAttribute('aria-expanded', 'true');
+  trigger.setAttribute('aria-controls', element.id);
+  openJobMenu = { trigger, element, jobId: trigger.dataset.jobId };
+  positionJobMenu();
+  const items = element.querySelectorAll('[role="menuitem"]');
+  (focusLast ? items[items.length - 1] : items[0])?.focus({ preventScroll: true });
+}
+
+// The menu lives outside the scrolling table. Rebind its anchor and actions
+// after polling replaces rows, preserving the focused action when possible.
+function refreshJobMenu() {
+  if (!openJobMenu) return;
+  const { element, jobId } = openJobMenu;
+  const trigger = Array.from(document.querySelectorAll('[data-job-menu-trigger]'))
+    .find((button) => button.dataset.jobId === jobId);
+  if (!trigger) {
+    closeJobMenu();
+    return;
+  }
+  const focused = element.contains(document.activeElement);
+  const action = focused ? document.activeElement.dataset.jobAction : null;
+  openJobMenu.trigger = trigger;
+  trigger.setAttribute('aria-expanded', 'true');
+  trigger.setAttribute('aria-controls', element.id);
+  element.innerHTML = trigger.parentElement.querySelector('[data-job-menu-content]').innerHTML;
+  positionJobMenu();
+  if (focused && openJobMenu) {
+    const items = Array.from(element.querySelectorAll('[role="menuitem"]'));
+    (items.find((item) => item.dataset.jobAction === action) || items[0])?.focus({ preventScroll: true });
+  }
+}
+
+function handleJobMenuKeydown(event) {
+  const trigger = event.target.closest('[data-job-menu-trigger]');
+  if (trigger && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+    event.preventDefault();
+    if (!openJobMenu || openJobMenu.trigger !== trigger) showJobMenu(trigger, event.key === 'ArrowUp');
+    else {
+      const items = openJobMenu.element.querySelectorAll('[role="menuitem"]');
+      (event.key === 'ArrowUp' ? items[items.length - 1] : items[0])?.focus();
+    }
+    return;
+  }
+  if (!openJobMenu) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    closeJobMenu(true);
+    return;
+  }
+  if (event.key === 'Tab') {
+    closeJobMenu(true);
+    return;
+  }
+  if (!openJobMenu.element.contains(event.target)) return;
+  const items = Array.from(openJobMenu.element.querySelectorAll('[role="menuitem"]'));
+  let next = items.indexOf(document.activeElement);
+  if (event.key === 'ArrowDown') next = (next + 1) % items.length;
+  else if (event.key === 'ArrowUp') next = (next - 1 + items.length) % items.length;
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = items.length - 1;
+  else return;
+  event.preventDefault();
+  items[next]?.focus();
 }
 
 function renderJobProgress(job) {
@@ -113,7 +233,7 @@ function rowTemplate(job) {
     <tr class="align-top transition hover:bg-white/70">
       <td data-label="ID" class="px-6 py-4">${idChip(id)}</td>
       <td data-label="Job" class="px-6 py-4">
-        <div class="max-w-[34rem] md:min-w-[22rem]">
+        <div class="max-w-[34rem] md:min-w-[16rem]">
           <div class="font-semibold leading-6 text-slate-900 break-words">${escapeHtml(display.title)}</div>
           ${displayDetail ? `<div class="mt-1 text-xs leading-5 text-slate-500 break-words">${escapeHtml(displayDetail)}</div>` : ''}
           ${renderJobProgress(job)}
@@ -122,9 +242,9 @@ function rowTemplate(job) {
       <td data-label="Status" class="px-6 py-4">
         ${statusPill(shownStatus)}
       </td>
-      <td data-label="Created" class="px-6 py-4 text-slate-600">${tableDateCell(job.created)}</td>
-      <td data-label="Updated" class="px-6 py-4 text-slate-600">${tableDateCell(job.updated)}</td>
-      <td data-label="Actions" class="cell-actions px-6 py-4 md:min-w-[24rem]">${actionButtons(job)}</td>
+      <td data-label="Created" class="px-6 py-4 text-slate-600 whitespace-nowrap">${tableDateCell(job.created)}</td>
+      <td data-label="Updated" class="px-6 py-4 text-slate-600 whitespace-nowrap">${tableDateCell(job.updated)}</td>
+      <td data-label="Actions" class="cell-actions px-6 py-4">${actionButtons(job)}</td>
     </tr>
   `;
 }
@@ -202,6 +322,7 @@ export async function loadJobs() {
     setInnerHTMLIfChanged(document.getElementById('icebergActiveBody'), icebergActive.map(rowTemplate).join(''), { preserveScroll: true });
     setInnerHTMLIfChanged(document.getElementById('dorisArchiveBody'), dorisArchive.map(rowTemplate).join(''), { preserveScroll: true });
     setInnerHTMLIfChanged(document.getElementById('icebergArchiveBody'), icebergArchive.map(rowTemplate).join(''), { preserveScroll: true });
+    refreshJobMenu();
     document.getElementById('dorisActiveEmpty').classList.toggle('hidden', dorisActive.length !== 0);
     document.getElementById('icebergActiveEmpty').classList.toggle('hidden', icebergActive.length !== 0);
     document.getElementById('dorisArchiveEmpty').classList.toggle('hidden', dorisArchive.length !== 0);
@@ -490,6 +611,12 @@ async function renameJob(id,currentName) {
 }
 
 function handleJobClick(event) {
+  const menuTrigger = event.target.closest('[data-job-menu-trigger]');
+  if (menuTrigger) {
+    showJobMenu(menuTrigger);
+    return;
+  }
+  if (openJobMenu && !openJobMenu.element.contains(event.target)) closeJobMenu();
   const bulkArchiveButton = event.target.closest('[data-bulk-delete-archive]');
   if (bulkArchiveButton) {
     bulkDeleteArchive(bulkArchiveButton.dataset.bulkDeleteArchive);
@@ -508,6 +635,7 @@ function handleJobClick(event) {
   const jobId = jobButton.dataset.jobId;
   const action = jobButton.dataset.jobAction;
   if (!jobId || !action) return;
+  closeJobMenu();
 
   if (action === 'rename') renameJob(jobId, jobButton.dataset.jobName || '');
   if (action === 'details') showJobDetails(jobId);
